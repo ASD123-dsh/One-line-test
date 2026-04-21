@@ -161,15 +161,40 @@ class FrameConfigDialog(QDialog):
     
     frameChanged = pyqtSignal(list)  # 帧数据改变信号
     
-    def __init__(self, parent=None, initial_frame: List[int] = None):
+    def __init__(
+        self,
+        parent=None,
+        initial_frame: List[int] = None,
+        byte_descriptions: List[str] = None,
+        dialog_title: str = None,
+    ):
         super().__init__(parent)
         self.frame_data = initial_frame or [0] * 12
+        self.byte_descriptions = byte_descriptions or self.default_byte_descriptions()
+        self.dialog_title = dialog_title or "协议帧详细配置"
         self.byte_editors = []
         self.init_ui()
         self.update_frame_display()
+
+    def default_byte_descriptions(self) -> List[str]:
+        """默认字节描述。"""
+        return [
+            "设备编码",
+            "流水号",
+            "Status1",
+            "Status2",
+            "Status3",
+            "Status4",
+            "Status5",
+            "Status6",
+            "Status7",
+            "Status8",
+            "Status9",
+            "校验和 (自动计算)",
+        ]
         
     def init_ui(self):
-        self.setWindowTitle("协议帧详细配置")
+        self.setWindowTitle(self.dialog_title)
         self.setModal(True)
         # 调整窗口大小以适合两列显示：宽度适合两列，高度适合6行内容
         self.resize(900, 800)
@@ -224,24 +249,10 @@ class FrameConfigDialog(QDialog):
         scroll_layout = QGridLayout()
         
         # 字节描述
-        byte_descriptions = [
-            "设备编码 (固定0x08)",
-            "流水号低8位 (固定0x61)",
-            "流水号高4位 + Status1",
-            "Status2 + 加密码",
-            "Status3 + 加密码",
-            "Status4 + 加密码",
-            "Status5 (不加密)",
-            "Status6 + 加密码",
-            "Status7 + 加密码",
-            "Status8 + 加密码",
-            "Status9 + 加密码",
-            "校验和 (自动计算)"
-        ]
-        
         # 创建字节编辑器 - 改为2x6布局（左右两列，每列6个）
         for i in range(12):
-            editor = ByteEditor(i, self.frame_data[i], byte_descriptions[i])
+            description = self.byte_descriptions[i] if i < len(self.byte_descriptions) else ""
+            editor = ByteEditor(i, self.frame_data[i], description)
             editor.valueChanged.connect(self.on_byte_changed)
             self.byte_editors.append(editor)
             

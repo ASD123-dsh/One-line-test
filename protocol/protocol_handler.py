@@ -15,6 +15,7 @@ PROTOCOL_HANGZHOU_ANXIAN = "杭州安显协议"
 PROTOCOL_CHANGZHOU_XINSIWEI = "常州新思维协议"
 PROTOCOL_WUXI_YIGE = "无锡一格Y67协议"
 PROTOCOL_YADEA = "雅迪协议"
+PROTOCOL_DONGWEI_GTXH = "东威GTXH协议"
 
 SUPPORTED_PROTOCOLS = [
     PROTOCOL_RUILUN,
@@ -23,6 +24,7 @@ SUPPORTED_PROTOCOLS = [
     PROTOCOL_CHANGZHOU_XINSIWEI,
     PROTOCOL_WUXI_YIGE,
     PROTOCOL_YADEA,
+    PROTOCOL_DONGWEI_GTXH,
 ]
 
 VOLTAGE_OPTIONS = (
@@ -190,7 +192,9 @@ class ProtocolHandler:
         """校验状态字段是否合法。"""
 
         protocol_name = self.resolve_protocol_name(status)
-        speed_mode_max = 7 if protocol_name in {PROTOCOL_XINRI, PROTOCOL_YADEA} else 3
+        speed_mode_max = (
+            7 if protocol_name in {PROTOCOL_XINRI, PROTOCOL_YADEA, PROTOCOL_DONGWEI_GTXH} else 3
+        )
         if not (0 <= status.speed_mode <= speed_mode_max):
             return False, f"当前协议的速度模式必须在 0-{speed_mode_max} 范围内"
 
@@ -220,6 +224,11 @@ class ProtocolHandler:
         )
         if voltage_mask_count > 1:
             return False, "协议切换电压最多只能勾选一个电压位"
+
+        if protocol_name == PROTOCOL_DONGWEI_GTXH:
+            unsupported_voltage_fields = ("voltage_36v", "voltage_64v", "voltage_84v")
+            if any(getattr(status, field_name, False) for field_name in unsupported_voltage_fields):
+                return False, "东威协议的电压状态仅支持默认/48V/60V/72V/80V/96V"
 
         if protocol_name == PROTOCOL_CHANGZHOU_XINSIWEI and not (
             0 <= status.xinsiwei_sequence <= 4095
@@ -288,6 +297,8 @@ class ProtocolHandler:
             return self._generate_wuxi_yige_frame(status)
         if protocol_name == PROTOCOL_YADEA:
             return self._generate_yadea_frame(status)
+        if protocol_name == PROTOCOL_DONGWEI_GTXH:
+            return self._generate_dongwei_gtxh_frame(status)
         return self._generate_ruilun_frame(status)
 
     def generate_frame_for_preview(self, status: StatusBits) -> Tuple[bool, List[int], str]:
@@ -304,6 +315,8 @@ class ProtocolHandler:
             return self._generate_wuxi_yige_frame(status)
         if protocol_name == PROTOCOL_YADEA:
             return self._generate_yadea_frame(status)
+        if protocol_name == PROTOCOL_DONGWEI_GTXH:
+            return self._generate_dongwei_gtxh_frame(status)
         return self._generate_ruilun_frame(status)
 
     def _generate_ruilun_frame(self, status: StatusBits) -> Tuple[bool, List[int], str]:
@@ -460,6 +473,27 @@ class ProtocolHandler:
         frame[11] = self._xor_checksum(frame[:11])
         return True, frame, ""
 
+    def _generate_dongwei_gtxh_frame(self, status: StatusBits) -> Tuple[bool, List[int], str]:
+        is_valid, error_msg = self.validate_status_bits(status)
+        if not is_valid:
+            return False, [], error_msg
+
+        hall_count = self._resolve_hall_count(status)
+        frame = [0] * 12
+        frame[0] = 0x08
+        frame[1] = 0x61
+        frame[2] = self._encode_dongwei_status1(status)
+        frame[3] = self._encode_generic_status2(status)
+        frame[4] = self._encode_generic_status3(status, PROTOCOL_DONGWEI_GTXH)
+        frame[5] = self._encode_generic_status4(status, PROTOCOL_DONGWEI_GTXH)
+        frame[6] = self._encode_dongwei_current(status.current_a)
+        frame[7] = (hall_count >> 8) & 0xFF
+        frame[8] = hall_count & 0xFF
+        frame[9] = status.soc_percent & 0xFF
+        frame[10] = status.current_percentage & 0xFF
+        frame[11] = self._xor_checksum(frame[:11])
+        return True, frame, ""
+
     def _encode_ruilun_status1(self, status: StatusBits) -> int:
         value = 0
         if status.distance_mode:
@@ -496,6 +530,13 @@ class ProtocolHandler:
             value |= 0x02
         return value
 
+    def _encode_dongwei_status1(self, status: StatusBits) -> int:
+        value = 0
+        if status.p_gear_protect:
+            value |= 0x08
+        value |= self._encode_dongwei_voltage_state(status)
+        return value
+
     def _encode_generic_status2(self, status: StatusBits, include_walk_mode: bool = False) -> int:
         value = 0
         if include_walk_mode and status.walk_mode:
@@ -518,7 +559,7 @@ class ProtocolHandler:
 
     def _encode_generic_status3(self, status: StatusBits, protocol_name: str) -> int:
         value = 0
-        if protocol_name == PROTOCOL_YADEA:
+        if protocol_name in {PROTOCOL_YADEA, PROTOCOL_DONGWEI_GTXH}:
             if status.speed_mode & 0x04:
                 value |= 0x80
         elif status.gear_four:
@@ -542,11 +583,14 @@ class ProtocolHandler:
         if protocol_name == PROTOCOL_WUXI_YIGE:
             if status.cloud_power_mode:
                 value |= 0x80
-        elif protocol_name == PROTOCOL_RUILUN:
+        elif protocol_name in {PROTOCOL_RUILUN, PROTOCOL_DONGWEI_GTXH}:
             if status.current_70_flag:
                 value |= 0x80
 
-        if status.one_key_enable:
+        if protocol_name == PROTOCOL_DONGWEI_GTXH:
+            if status.side_stand:
+                value |= 0x40
+        elif status.one_key_enable:
             value |= 0x40
         if status.ekk_enable:
             value |= 0x20
@@ -587,6 +631,24 @@ class ProtocolHandler:
     def _encode_xinri_current(self, current_a: int) -> int:
         raw_value = round(abs(current_a) * 5)
         return max(0, min(255, raw_value))
+
+    def _encode_dongwei_current(self, current_a: int) -> int:
+        scaled_value = round(current_a * 5)
+        scaled_value = max(-128, min(127, scaled_value))
+        return scaled_value & 0xFF
+
+    def _encode_dongwei_voltage_state(self, status: StatusBits) -> int:
+        if status.voltage_48v:
+            return 0x02
+        if status.voltage_60v:
+            return 0x01
+        if status.voltage_72v:
+            return 0x03
+        if status.voltage_80v:
+            return 0x04
+        if status.voltage_96v:
+            return 0x05
+        return 0x00
 
     def _encode_xinsiwei_status1(self, status: StatusBits) -> int:
         value = 0
@@ -734,6 +796,20 @@ class ProtocolHandler:
                 "Status6 霍尔计数高字节",
                 "Status7 霍尔计数低字节",
                 "Status8 电量百分比",
+                "Status9 电流百分比",
+                "校验和 (XOR)",
+            ],
+            PROTOCOL_DONGWEI_GTXH: [
+                "设备编码 (固定 0x08)",
+                "流水号 (固定 0x61)",
+                "Status1 P驻车 + 电压状态",
+                "Status2",
+                "Status3 档位模式",
+                "Status4 侧撑/EKK/保护",
+                "Status5 运行电流 (0.2A/LSB)",
+                "Status6 霍尔计数高字节",
+                "Status7 霍尔计数低字节",
+                "Status8 电压/电量百分比",
                 "Status9 电流百分比",
                 "校验和 (XOR)",
             ],
@@ -960,6 +1036,46 @@ class PresetScenarios:
         status = StatusBits(protocol_name=PROTOCOL_YADEA)
         status.hall_count = 0
         status.soc_percent = 18
+        status.current_percentage = 0
+        status.hall_fault = True
+        status.controller_fault = True
+        status.under_voltage = True
+        status.side_stand = True
+        status.p_gear_protect = True
+        return status
+
+    @staticmethod
+    def dongwei_gtxh_normal_running() -> StatusBits:
+        status = StatusBits(protocol_name=PROTOCOL_DONGWEI_GTXH)
+        status.voltage_48v = True
+        status.hall_count = 3000
+        status.soc_percent = 80
+        status.current_percentage = 55
+        status.motor_running = True
+        status.speed_mode = 3
+        status.current_a = 10
+        return status
+
+    @staticmethod
+    def dongwei_gtxh_energy_recovery() -> StatusBits:
+        status = StatusBits(protocol_name=PROTOCOL_DONGWEI_GTXH)
+        status.voltage_72v = True
+        status.voltage_48v = False
+        status.hall_count = 2400
+        status.soc_percent = 65
+        status.current_percentage = 30
+        status.regen_charging = True
+        status.current_a = -2
+        status.speed_mode = 2
+        return status
+
+    @staticmethod
+    def dongwei_gtxh_fault_scenario() -> StatusBits:
+        status = StatusBits(protocol_name=PROTOCOL_DONGWEI_GTXH)
+        status.voltage_80v = True
+        status.voltage_48v = False
+        status.hall_count = 0
+        status.soc_percent = 20
         status.current_percentage = 0
         status.hall_fault = True
         status.controller_fault = True

@@ -15,13 +15,14 @@ from PyQt5.QtWidgets import (
     QGroupBox, QLabel, QComboBox, QPushButton, QSpinBox, QDoubleSpinBox,
     QCheckBox, QRadioButton, QButtonGroup, QTextEdit, QLineEdit,
     QMessageBox, QSplitter, QFrame, QScrollArea, QTabWidget,
-    QProgressBar, QStatusBar, QDialog
+    QProgressBar, QStatusBar, QDialog, QToolButton
 )
 from PyQt5.QtCore import Qt, QTimer, pyqtSlot
 from PyQt5.QtGui import QFont, QIcon, QPalette, QColor
 
 from protocol.protocol_handler import (
     PROTOCOL_CHANGZHOU_XINSIWEI,
+    PROTOCOL_DONGWEI_GTXH,
     PROTOCOL_HANGZHOU_ANXIAN,
     PROTOCOL_RUILUN,
     PROTOCOL_WUXI_YIGE,
@@ -31,6 +32,7 @@ from protocol.protocol_handler import (
     StatusBits,
     PresetScenarios,
 )
+from gui.feedback_dialog import FeedbackDialog
 from serial_comm.serial_manager import SerialManager, SerialPortDetector
 from gui.frame_config_dialog import FrameConfigDialog
 
@@ -75,11 +77,23 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central_widget)
         
         # 创建主布局
-        main_layout = QHBoxLayout(central_widget)
+        main_layout = QVBoxLayout(central_widget)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        title_bar = self.create_window_action_bar()
+        main_layout.addWidget(title_bar)
+
+        content_widget = QWidget()
+        content_layout = QHBoxLayout(content_widget)
+        content_layout.setContentsMargins(10, 10, 10, 10)
+        content_layout.setSpacing(10)
         
         # 创建分割器
         splitter = QSplitter(Qt.Horizontal)
-        main_layout.addWidget(splitter)
+        splitter = QSplitter(Qt.Horizontal)
+        content_layout.addWidget(splitter)
+        main_layout.addWidget(content_widget, 1)
         
         # 左侧控制面板
         left_panel = self.create_control_panel()
@@ -99,6 +113,16 @@ class MainWindow(QMainWindow):
         self.setStyleSheet("""
             QMainWindow {
                 background-color: #f0f0f0;
+            }
+            QFrame#windowActionBar {
+                background-color: #f8f8f8;
+                border-bottom: 1px solid #d9d9d9;
+            }
+            QLabel#windowActionTitle {
+                color: #4d4d4d;
+                font-size: 12px;
+                font-weight: bold;
+                padding-left: 4px;
             }
             QGroupBox {
                 font-weight: bold;
@@ -130,8 +154,54 @@ class MainWindow(QMainWindow):
                 background-color: #cccccc;
                 color: #666666;
             }
+            QToolButton#feedbackButton {
+                background-color: transparent;
+                border: none;
+                color: #4d4d4d;
+                font-size: 18px;
+                font-weight: bold;
+                padding: 0;
+            }
+            QToolButton#feedbackButton:hover {
+                background-color: #e9eef5;
+                color: #1d5fa7;
+            }
+            QToolButton#feedbackButton:pressed {
+                background-color: #d8e5f5;
+            }
         """)
     
+    def create_window_action_bar(self) -> QFrame:
+        """创建右上角反馈操作栏。"""
+        bar = QFrame()
+        bar.setObjectName("windowActionBar")
+        bar.setFixedHeight(34)
+
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(10, 0, 0, 0)
+        layout.setSpacing(0)
+
+        title_label = QLabel("AD仪表一线通协议测试工具")
+        title_label.setObjectName("windowActionTitle")
+        layout.addWidget(title_label)
+        layout.addStretch()
+
+        self.feedback_btn = QToolButton()
+        self.feedback_btn.setObjectName("feedbackButton")
+        self.feedback_btn.setText("?")
+        self.feedback_btn.setToolTip("扫码反馈")
+        self.feedback_btn.setCursor(Qt.PointingHandCursor)
+        self.feedback_btn.setFixedSize(42, 34)
+        self.feedback_btn.clicked.connect(self.show_feedback_dialog)
+        layout.addWidget(self.feedback_btn)
+
+        return bar
+
+    def show_feedback_dialog(self):
+        """显示作者联系二维码。"""
+        dialog = FeedbackDialog(self)
+        dialog.exec_()
+
     def create_control_panel(self) -> QWidget:
         """创建左侧控制面板"""
         panel = QWidget()
@@ -215,6 +285,7 @@ class MainWindow(QMainWindow):
                 PROTOCOL_CHANGZHOU_XINSIWEI,
                 PROTOCOL_WUXI_YIGE,
                 PROTOCOL_YADEA,
+                PROTOCOL_DONGWEI_GTXH,
             ]
         )
         self.protocol_combo.setCurrentText(PROTOCOL_RUILUN)
@@ -310,6 +381,13 @@ class MainWindow(QMainWindow):
                 ("P档 (D1)", True),
                 ("备用 (D0)", False),
             ]
+        elif protocol == PROTOCOL_DONGWEI_GTXH:
+            labels = [
+                ("电压状态位 D2 (由下方电压状态控制)", False),
+                ("电压状态位 D1 (由下方电压状态控制)", False),
+                ("P驻车 (D3)", True),
+                ("电压状态位 D0 (由下方电压状态控制)", False),
+            ]
         elif protocol == PROTOCOL_WUXI_YIGE:
             labels = [
                 ("侧撑指示 (D3)", True),
@@ -389,8 +467,18 @@ class MainWindow(QMainWindow):
         widget = QWidget()
         layout = QGridLayout(widget)
         
-        d7_text = "速度模式高位 (D7)" if self.current_protocol == PROTOCOL_YADEA else "四档指示 (D7)"
-        speed_mode_label = "速度模式 (D7+D1~D0):" if self.current_protocol == PROTOCOL_YADEA else "三速模式 (D1~D0):"
+        d7_text = (
+            "速度模式高位 (D7)"
+            if self.current_protocol in {PROTOCOL_YADEA, PROTOCOL_DONGWEI_GTXH}
+            else "四档指示 (D7)"
+        )
+        speed_mode_label = (
+            "档位模式 (D7+D1~D0):"
+            if self.current_protocol == PROTOCOL_DONGWEI_GTXH
+            else "速度模式 (D7+D1~D0):"
+            if self.current_protocol == PROTOCOL_YADEA
+            else "三速模式 (D1~D0):"
+        )
 
         self.gear_four_cb = QCheckBox(d7_text)
         layout.addWidget(self.gear_four_cb, 0, 0)
@@ -412,7 +500,9 @@ class MainWindow(QMainWindow):
         
         layout.addWidget(QLabel(speed_mode_label), 3, 0)
         self.speed_mode_spin = QSpinBox()
-        self.speed_mode_spin.setRange(0, 7 if self.current_protocol == PROTOCOL_YADEA else 3)
+        self.speed_mode_spin.setRange(
+            0, 7 if self.current_protocol in {PROTOCOL_YADEA, PROTOCOL_DONGWEI_GTXH} else 3
+        )
         layout.addWidget(self.speed_mode_spin, 3, 1)
         
         return widget
@@ -425,7 +515,7 @@ class MainWindow(QMainWindow):
         if self.current_protocol == PROTOCOL_WUXI_YIGE:
             d7_text = "云动力模式(速度提升) (D7)"
             d7_enabled = True
-        elif self.current_protocol == PROTOCOL_RUILUN:
+        elif self.current_protocol in {PROTOCOL_RUILUN, PROTOCOL_DONGWEI_GTXH}:
             d7_text = "70%电流标志 (D7)"
             d7_enabled = True
         else:
@@ -436,7 +526,8 @@ class MainWindow(QMainWindow):
         self.current_70_flag_cb.setEnabled(d7_enabled)
         layout.addWidget(self.current_70_flag_cb, 0, 0)
         
-        self.one_key_enable_cb = QCheckBox("一键通启用 (D6)")
+        d6_text = "侧撑检测/单撑 (D6)" if self.current_protocol == PROTOCOL_DONGWEI_GTXH else "一键通启用 (D6)"
+        self.one_key_enable_cb = QCheckBox(d6_text)
         layout.addWidget(self.one_key_enable_cb, 0, 1)
         
         self.ekk_enable_cb = QCheckBox("EKK启用 (D5)")
@@ -469,6 +560,7 @@ class MainWindow(QMainWindow):
             "soc_fault_cb",
             "current_percent_spin",
             "voltage_group",
+            "voltage_default_rb",
             "voltage_36v_rb",
             "voltage_48v_rb",
             "voltage_60v_rb",
@@ -482,7 +574,12 @@ class MainWindow(QMainWindow):
                 delattr(self, attr_name)
         
         # Status5 - 运行电流
-        layout.addWidget(QLabel("运行电流 (A):"), 0, 0)
+        current_label = (
+            "运行电流 (A，发送按 0.2A/LSB 编码):"
+            if protocol == PROTOCOL_DONGWEI_GTXH
+            else "运行电流 (A):"
+        )
+        layout.addWidget(QLabel(current_label), 0, 0)
         self.current_spin = QSpinBox()
         self.current_spin.setRange(-128, 127)
         self.current_spin.setValue(0)
@@ -508,6 +605,8 @@ class MainWindow(QMainWindow):
             status8_text = "电压百分比 (Status8):"
         elif protocol == PROTOCOL_YADEA:
             status8_text = "电量百分比 (Status8):"
+        elif protocol == PROTOCOL_DONGWEI_GTXH:
+            status8_text = "电压/电量百分比 (Status8):"
         else:
             status8_text = "电池SOC (%):"
 
@@ -536,51 +635,70 @@ class MainWindow(QMainWindow):
         layout.addLayout(status8_layout, 3, 1)
 
         row_index = 4
-        if protocol == PROTOCOL_YADEA:
+        if protocol in {PROTOCOL_YADEA, PROTOCOL_DONGWEI_GTXH}:
             layout.addWidget(QLabel("电流百分比 (Status9):"), row_index, 0)
             self.current_percent_spin = QSpinBox()
             self.current_percent_spin.setRange(0, 100)
             self.current_percent_spin.setValue(50)
             layout.addWidget(self.current_percent_spin, row_index, 1)
+            row_index += 1
+
+        if protocol == PROTOCOL_YADEA:
             return widget
 
         # Status9 - 系统电压
-        voltage_group = QGroupBox("系统电压 (仅选一个，可全不选)")
+        voltage_group_title = (
+            "电压状态 (DATA2 D2~D0，仅支持默认/48V/60V/72V/80V/96V)"
+            if protocol == PROTOCOL_DONGWEI_GTXH
+            else "系统电压 (仅选一个，可全不选)"
+        )
+        voltage_group = QGroupBox(voltage_group_title)
         voltage_layout = QGridLayout(voltage_group)
         self.voltage_group = QButtonGroup()
 
+        if protocol == PROTOCOL_DONGWEI_GTXH:
+            self.voltage_default_rb = QRadioButton("仪表默认")
+            self.voltage_group.addButton(self.voltage_default_rb, 8)
+            voltage_layout.addWidget(self.voltage_default_rb, 0, 0)
+
         self.voltage_36v_rb = QRadioButton("36V")
         self.voltage_group.addButton(self.voltage_36v_rb, 0)
-        voltage_layout.addWidget(self.voltage_36v_rb, 0, 0)
+        voltage_layout.addWidget(self.voltage_36v_rb, 0 if protocol != PROTOCOL_DONGWEI_GTXH else 1, 0)
 
         self.voltage_48v_rb = QRadioButton("48V")
-        self.voltage_48v_rb.setChecked(True)
+        self.voltage_48v_rb.setChecked(protocol != PROTOCOL_DONGWEI_GTXH)
         self.voltage_group.addButton(self.voltage_48v_rb, 1)
-        voltage_layout.addWidget(self.voltage_48v_rb, 0, 1)
+        voltage_layout.addWidget(self.voltage_48v_rb, 0 if protocol != PROTOCOL_DONGWEI_GTXH else 1, 1)
 
         self.voltage_60v_rb = QRadioButton("60V")
         self.voltage_group.addButton(self.voltage_60v_rb, 2)
-        voltage_layout.addWidget(self.voltage_60v_rb, 0, 2)
+        voltage_layout.addWidget(self.voltage_60v_rb, 0 if protocol != PROTOCOL_DONGWEI_GTXH else 1, 2)
 
         self.voltage_64v_rb = QRadioButton("64V")
         self.voltage_group.addButton(self.voltage_64v_rb, 3)
-        voltage_layout.addWidget(self.voltage_64v_rb, 0, 3)
+        voltage_layout.addWidget(self.voltage_64v_rb, 0 if protocol != PROTOCOL_DONGWEI_GTXH else 1, 3)
 
         self.voltage_72v_rb = QRadioButton("72V")
         self.voltage_group.addButton(self.voltage_72v_rb, 4)
-        voltage_layout.addWidget(self.voltage_72v_rb, 1, 0)
+        voltage_layout.addWidget(self.voltage_72v_rb, 1 if protocol != PROTOCOL_DONGWEI_GTXH else 2, 0)
 
         self.voltage_80v_rb = QRadioButton("80V")
         self.voltage_group.addButton(self.voltage_80v_rb, 5)
-        voltage_layout.addWidget(self.voltage_80v_rb, 1, 1)
+        voltage_layout.addWidget(self.voltage_80v_rb, 1 if protocol != PROTOCOL_DONGWEI_GTXH else 2, 1)
 
         self.voltage_84v_rb = QRadioButton("84V")
         self.voltage_group.addButton(self.voltage_84v_rb, 6)
-        voltage_layout.addWidget(self.voltage_84v_rb, 1, 2)
+        voltage_layout.addWidget(self.voltage_84v_rb, 1 if protocol != PROTOCOL_DONGWEI_GTXH else 2, 2)
 
         self.voltage_96v_rb = QRadioButton("96V")
         self.voltage_group.addButton(self.voltage_96v_rb, 7)
-        voltage_layout.addWidget(self.voltage_96v_rb, 1, 3)
+        voltage_layout.addWidget(self.voltage_96v_rb, 1 if protocol != PROTOCOL_DONGWEI_GTXH else 2, 3)
+
+        if protocol == PROTOCOL_DONGWEI_GTXH:
+            self.voltage_default_rb.setChecked(True)
+            self.voltage_36v_rb.setEnabled(False)
+            self.voltage_64v_rb.setEnabled(False)
+            self.voltage_84v_rb.setEnabled(False)
 
         layout.addWidget(voltage_group, row_index, 0, 1, 2)
         
@@ -864,6 +982,8 @@ class MainWindow(QMainWindow):
             self.switch_to_wuxi_yige_protocol()
         elif protocol_name == PROTOCOL_YADEA:
             self.switch_to_yadea_protocol()
+        elif protocol_name == PROTOCOL_DONGWEI_GTXH:
+            self.switch_to_dongwei_gtxh_protocol()
         
         # 更新当前帧显示
         self.update_current_frame_display()
@@ -926,6 +1046,13 @@ class MainWindow(QMainWindow):
     def switch_to_yadea_protocol(self):
         """切换到雅迪协议"""
         self.current_status = PresetScenarios.yadea_normal_running()
+        self.show_ruilun_status_config()
+        self.normal_radio.setChecked(True)
+        self.on_scenario_changed()
+
+    def switch_to_dongwei_gtxh_protocol(self):
+        """切换到东威 GTXH 协议"""
+        self.current_status = PresetScenarios.dongwei_gtxh_normal_running()
         self.show_ruilun_status_config()
         self.normal_radio.setChecked(True)
         self.on_scenario_changed()
@@ -1567,6 +1694,8 @@ class MainWindow(QMainWindow):
                 self.load_wuxi_yige_preset_scenario(scenario_id)
             elif self.current_protocol == PROTOCOL_YADEA:
                 self.load_yadea_preset_scenario(scenario_id)
+            elif self.current_protocol == PROTOCOL_DONGWEI_GTXH:
+                self.load_dongwei_gtxh_preset_scenario(scenario_id)
         
         # 记录当前场景ID，用于下次切换时判断
         self._previous_scenario_id = scenario_id
@@ -1638,6 +1767,19 @@ class MainWindow(QMainWindow):
             self.current_status = PresetScenarios.yadea_fault_scenario()
         else:
             self.current_status = StatusBits(protocol_name=PROTOCOL_YADEA)
+
+        self.update_ruilun_ui_from_status()
+
+    def load_dongwei_gtxh_preset_scenario(self, scenario_id):
+        """加载东威 GTXH 协议预设场景"""
+        if scenario_id == 0:
+            self.current_status = PresetScenarios.dongwei_gtxh_normal_running()
+        elif scenario_id == 1:
+            self.current_status = PresetScenarios.dongwei_gtxh_energy_recovery()
+        elif scenario_id == 2:
+            self.current_status = PresetScenarios.dongwei_gtxh_fault_scenario()
+        else:
+            self.current_status = StatusBits(protocol_name=PROTOCOL_DONGWEI_GTXH)
 
         self.update_ruilun_ui_from_status()
     
@@ -1756,6 +1898,11 @@ class MainWindow(QMainWindow):
             self.speed_alarm_cb.setChecked(getattr(status, "protocol_speed_limit", False))
             self.p_gear_protect_cb.setChecked(getattr(status, "p_gear_protect", False))
             self.tcs_status_cb.setChecked(False)
+        elif self.current_protocol == PROTOCOL_DONGWEI_GTXH:
+            self.distance_mode_cb.setChecked(False)
+            self.speed_alarm_cb.setChecked(False)
+            self.p_gear_protect_cb.setChecked(getattr(status, "p_gear_protect", False))
+            self.tcs_status_cb.setChecked(False)
         elif self.current_protocol == PROTOCOL_WUXI_YIGE:
             self.distance_mode_cb.setChecked(getattr(status, "side_stand", False))
             self.speed_alarm_cb.setChecked(False)
@@ -1793,7 +1940,10 @@ class MainWindow(QMainWindow):
             self.current_70_flag_cb.setChecked(getattr(status, "cloud_power_mode", False))
         else:
             self.current_70_flag_cb.setChecked(getattr(status, "current_70_flag", False))
-        self.one_key_enable_cb.setChecked(getattr(status, "one_key_enable", False))
+        if self.current_protocol == PROTOCOL_DONGWEI_GTXH:
+            self.one_key_enable_cb.setChecked(getattr(status, "side_stand", False))
+        else:
+            self.one_key_enable_cb.setChecked(getattr(status, "one_key_enable", False))
         self.ekk_enable_cb.setChecked(getattr(status, "ekk_enable", False))
         self.over_current_cb.setChecked(getattr(status, "over_current", False))
         self.stall_protect_cb.setChecked(getattr(status, "stall_protect", False))
@@ -1832,6 +1982,8 @@ class MainWindow(QMainWindow):
                 button = self.voltage_group.button(checked_index)
                 if button is not None:
                     button.setChecked(True)
+            elif self.current_protocol == PROTOCOL_DONGWEI_GTXH and hasattr(self, "voltage_default_rb"):
+                self.voltage_default_rb.setChecked(True)
     
     def update_xinri_ui_from_status(self):
         """根据新日协议状态更新UI显示"""
@@ -1953,6 +2105,8 @@ class MainWindow(QMainWindow):
         if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN:
             status.protocol_speed_limit = self.speed_alarm_cb.isChecked()
             status.p_gear_protect = self.p_gear_protect_cb.isChecked()
+        elif self.current_protocol == PROTOCOL_DONGWEI_GTXH:
+            status.p_gear_protect = self.p_gear_protect_cb.isChecked()
         elif self.current_protocol in {PROTOCOL_WUXI_YIGE, PROTOCOL_YADEA}:
             status.side_stand = self.distance_mode_cb.isChecked()
             status.p_gear_protect = self.p_gear_protect_cb.isChecked()
@@ -1986,7 +2140,10 @@ class MainWindow(QMainWindow):
             status.cloud_power_mode = self.current_70_flag_cb.isChecked()
         else:
             status.current_70_flag = self.current_70_flag_cb.isChecked()
-        status.one_key_enable = self.one_key_enable_cb.isChecked()
+        if self.current_protocol == PROTOCOL_DONGWEI_GTXH:
+            status.side_stand = self.one_key_enable_cb.isChecked()
+        else:
+            status.one_key_enable = self.one_key_enable_cb.isChecked()
         status.ekk_enable = self.ekk_enable_cb.isChecked()
         status.over_current = self.over_current_cb.isChecked()
         status.stall_protect = self.stall_protect_cb.isChecked()
@@ -2012,14 +2169,24 @@ class MainWindow(QMainWindow):
         # 系统电压
         if getattr(self, "voltage_group", None) is not None:
             voltage_id = self.voltage_group.checkedId()
-            status.voltage_36v = (voltage_id == 0)
-            status.voltage_48v = (voltage_id == 1)
-            status.voltage_60v = (voltage_id == 2)
-            status.voltage_64v = (voltage_id == 3)
-            status.voltage_72v = (voltage_id == 4)
-            status.voltage_80v = (voltage_id == 5)
-            status.voltage_84v = (voltage_id == 6)
-            status.voltage_96v = (voltage_id == 7)
+            if self.current_protocol == PROTOCOL_DONGWEI_GTXH and voltage_id == 8:
+                status.voltage_36v = False
+                status.voltage_48v = False
+                status.voltage_60v = False
+                status.voltage_64v = False
+                status.voltage_72v = False
+                status.voltage_80v = False
+                status.voltage_84v = False
+                status.voltage_96v = False
+            else:
+                status.voltage_36v = (voltage_id == 0)
+                status.voltage_48v = (voltage_id == 1)
+                status.voltage_60v = (voltage_id == 2)
+                status.voltage_64v = (voltage_id == 3)
+                status.voltage_72v = (voltage_id == 4)
+                status.voltage_80v = (voltage_id == 5)
+                status.voltage_84v = (voltage_id == 6)
+                status.voltage_96v = (voltage_id == 7)
         else:
             status.voltage_36v = False
             status.voltage_48v = False

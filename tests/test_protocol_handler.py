@@ -2,6 +2,7 @@ import unittest
 
 from protocol.protocol_handler import (
     PROTOCOL_CHANGZHOU_XINSIWEI,
+    PROTOCOL_DONGWEI_GTXH,
     PROTOCOL_HANGZHOU_ANXIAN,
     PROTOCOL_RUILUN,
     PROTOCOL_WUXI_YIGE,
@@ -112,6 +113,27 @@ class ProtocolHandlerTests(unittest.TestCase):
         self.assertTrue(success, error)
         self.assertEqual(frame, [8, 97, 10, 66, 201, 2, 254, 0, 42, 75, 60, 73])
 
+    def test_dongwei_gtxh_frame_supports_voltage_state_and_current_percentage(self):
+        status = StatusBits(protocol_name=PROTOCOL_DONGWEI_GTXH)
+        status.voltage_48v = True
+        status.p_gear_protect = True
+        status.hall_fault = True
+        status.motor_running = True
+        status.regen_charging = True
+        status.speed_mode = 5
+        status.current_70_flag = True
+        status.side_stand = True
+        status.electronic_brake = True
+        status.current_a = -2
+        status.hall_count = 0x002A
+        status.soc_percent = 75
+        status.current_percentage = 60
+
+        success, frame, error = self.handler.generate_frame_for_preview(status)
+
+        self.assertTrue(success, error)
+        self.assertEqual(frame, [8, 97, 10, 64, 201, 194, 246, 0, 42, 75, 60, 131])
+
     def test_xinsiwei_preview_does_not_increment_sequence(self):
         status = PresetScenarios.changzhou_xinsiwei_normal_running()
 
@@ -134,6 +156,7 @@ class ProtocolHandlerTests(unittest.TestCase):
             PROTOCOL_CHANGZHOU_XINSIWEI,
             PROTOCOL_WUXI_YIGE,
             PROTOCOL_YADEA,
+            PROTOCOL_DONGWEI_GTXH,
         ):
             descriptions = self.handler.get_byte_descriptions(protocol_name)
             self.assertEqual(len(descriptions), 12)

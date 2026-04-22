@@ -267,6 +267,75 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.connection_status, 4, 0, 1, 3)
         
         return group
+
+    def _compact_status_tab_pages(self):
+        """统一收紧 Status 页签内部布局，避免选项间空白过大。"""
+        for index in range(self.status_tabs.count()):
+            self._compact_status_layout_tree(self.status_tabs.widget(index), is_root=True)
+
+    def _last_used_grid_row(self, layout: QGridLayout) -> int:
+        """返回当前网格布局中实际使用到的最后一行。"""
+        last_row = -1
+        for index in range(layout.count()):
+            row, _, row_span, _ = layout.getItemPosition(index)
+            last_row = max(last_row, row + row_span - 1)
+        return last_row
+
+    def _compact_status_layout_tree(self, widget_or_layout, is_root=False):
+        """递归压缩 Status 页签布局的间距和拉伸。"""
+        if widget_or_layout is None:
+            return
+
+        if isinstance(widget_or_layout, QWidget):
+            layout = widget_or_layout.layout()
+            if layout is None:
+                return
+        else:
+            layout = widget_or_layout
+
+        if isinstance(layout, QGridLayout):
+            if is_root:
+                layout.setContentsMargins(10, 10, 10, 8)
+                layout.setHorizontalSpacing(18)
+                layout.setVerticalSpacing(8)
+            else:
+                layout.setContentsMargins(8, 8, 8, 6)
+                layout.setHorizontalSpacing(12)
+                layout.setVerticalSpacing(6)
+
+            layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+            last_row = self._last_used_grid_row(layout)
+            if last_row >= 0:
+                layout.setRowStretch(last_row + 1, 1)
+        elif isinstance(layout, QVBoxLayout):
+            if is_root:
+                layout.setContentsMargins(10, 8, 10, 8)
+            layout.setSpacing(8)
+            layout.setAlignment(Qt.AlignTop)
+        elif isinstance(layout, QHBoxLayout):
+            if is_root:
+                layout.setContentsMargins(8, 6, 8, 6)
+            layout.setSpacing(8)
+
+        for index in range(layout.count()):
+            item = layout.itemAt(index)
+
+            child_layout = item.layout()
+            if child_layout is not None:
+                self._compact_status_layout_tree(child_layout)
+
+            child_widget = item.widget()
+            if child_widget is None:
+                continue
+
+            if isinstance(child_widget, QScrollArea):
+                scroll_widget = child_widget.widget()
+                if scroll_widget is not None:
+                    self._compact_status_layout_tree(scroll_widget, is_root=True)
+                continue
+
+            if child_widget.layout() is not None:
+                self._compact_status_layout_tree(child_widget, is_root=True)
     
     def create_scenario_group(self) -> QGroupBox:
         """创建协议和场景选择组"""
@@ -807,6 +876,7 @@ class MainWindow(QMainWindow):
         self.port_detector.ports_changed.connect(self.on_ports_changed)
         
         # Status位控件信号连接 - 实时更新当前帧数据
+        self._compact_status_tab_pages()
         self.connect_status_signals()
     
     def connect_status_signals(self):
@@ -1077,6 +1147,7 @@ class MainWindow(QMainWindow):
         
         status5_9_tab = self.create_ruilun_status5_9_tab()
         self.status_tabs.addTab(status5_9_tab, "Status5-9")
+        self._compact_status_tab_pages()
         
         # 重新连接信号
         self.connect_status_signals()
@@ -1103,6 +1174,7 @@ class MainWindow(QMainWindow):
         self.status_tabs.addTab(status5_9_tab, "Status5-9")
         
         # 重新连接信号
+        self._compact_status_tab_pages()
         self.connect_changzhou_xinsiwei_status_signals()
 
     def show_xinri_status_config(self):
@@ -1118,6 +1190,7 @@ class MainWindow(QMainWindow):
         self.status_tabs.addTab(self.create_xinri_battery_status_tab(), "电池状态")
         
         # 重新连接信号
+        self._compact_status_tab_pages()
         self.connect_xinri_status_signals()
     
     def create_xinsiwei_status1_tab(self) -> QWidget:

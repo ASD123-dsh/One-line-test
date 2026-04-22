@@ -16,6 +16,7 @@ PROTOCOL_CHANGZHOU_XINSIWEI = "常州新思维协议"
 PROTOCOL_WUXI_YIGE = "无锡一格Y67协议"
 PROTOCOL_YADEA = "雅迪协议"
 PROTOCOL_DONGWEI_GTXH = "东威GTXH协议"
+PROTOCOL_XINCHI = "芯驰BMS协议"
 
 SUPPORTED_PROTOCOLS = [
     PROTOCOL_RUILUN,
@@ -25,6 +26,7 @@ SUPPORTED_PROTOCOLS = [
     PROTOCOL_WUXI_YIGE,
     PROTOCOL_YADEA,
     PROTOCOL_DONGWEI_GTXH,
+    PROTOCOL_XINCHI,
 ]
 
 VOLTAGE_OPTIONS = (
@@ -130,6 +132,19 @@ class StatusBits:
     protocol_identifier: int = 0
     sequence_number: int = 0
 
+    # 芯驰 BMS-SIF
+    xinchi_charge_mos: bool = False
+    xinchi_discharge_mos: bool = False
+    xinchi_high_temp_fault: bool = False
+    xinchi_low_temp_fault: bool = False
+    xinchi_over_voltage_fault: bool = False
+    xinchi_under_voltage_fault: bool = False
+    xinchi_bms_fault: bool = False
+    xinchi_cycle_count: int = 0
+    xinchi_temperature_c: int = 25
+    xinchi_total_voltage_v: float = 48.0
+    xinchi_total_current_a: int = 0
+
 
 class ProtocolHandler:
     """多协议帧生成器。"""
@@ -149,6 +164,16 @@ class ProtocolHandler:
         if protocol_name not in SUPPORTED_PROTOCOLS:
             return PROTOCOL_RUILUN
         return protocol_name
+
+    def get_protocol_frame_length(self, protocol_name: str) -> int:
+        """获取协议帧长度。"""
+
+        return 10 if protocol_name == PROTOCOL_XINCHI else 12
+
+    def get_protocol_checksum_mode(self, protocol_name: str) -> str:
+        """获取协议校验模式。"""
+
+        return "sum" if protocol_name == PROTOCOL_XINCHI else "xor"
 
     def get_current_xinsiwei_sequence(self) -> int:
         """获取当前常州新思维序号。"""
@@ -235,6 +260,16 @@ class ProtocolHandler:
         ):
             return False, "常州新思维序号必须在 0-4095 范围内"
 
+        if protocol_name == PROTOCOL_XINCHI:
+            if not (0 <= status.xinchi_cycle_count <= 65535):
+                return False, "芯驰循环次数必须在 0-65535 范围内"
+            if not (-40 <= status.xinchi_temperature_c <= 120):
+                return False, "芯驰电池温度必须在 -40℃ 到 120℃ 范围内"
+            if not (0 <= status.xinchi_total_voltage_v <= 6553.5):
+                return False, "芯驰总电压必须在 0.0V 到 6553.5V 范围内"
+            if not (0 <= status.xinchi_total_current_a <= 255):
+                return False, "芯驰总电流必须在 0A 到 255A 范围内"
+
         return True, ""
 
     def xinsiwei_pluscode_encrypt(self, data_bytes: List[int]) -> int:
@@ -299,6 +334,8 @@ class ProtocolHandler:
             return self._generate_yadea_frame(status)
         if protocol_name == PROTOCOL_DONGWEI_GTXH:
             return self._generate_dongwei_gtxh_frame(status)
+        if protocol_name == PROTOCOL_XINCHI:
+            return self._generate_xinchi_frame(status)
         return self._generate_ruilun_frame(status)
 
     def generate_frame_for_preview(self, status: StatusBits) -> Tuple[bool, List[int], str]:
@@ -317,6 +354,8 @@ class ProtocolHandler:
             return self._generate_yadea_frame(status)
         if protocol_name == PROTOCOL_DONGWEI_GTXH:
             return self._generate_dongwei_gtxh_frame(status)
+        if protocol_name == PROTOCOL_XINCHI:
+            return self._generate_xinchi_frame(status)
         return self._generate_ruilun_frame(status)
 
     def _generate_ruilun_frame(self, status: StatusBits) -> Tuple[bool, List[int], str]:
@@ -494,6 +533,26 @@ class ProtocolHandler:
         frame[11] = self._xor_checksum(frame[:11])
         return True, frame, ""
 
+    def _generate_xinchi_frame(self, status: StatusBits) -> Tuple[bool, List[int], str]:
+        is_valid, error_msg = self.validate_status_bits(status)
+        if not is_valid:
+            return False, [], error_msg
+
+        voltage_raw = max(0, min(65535, int(round(status.xinchi_total_voltage_v * 10))))
+
+        frame = [0] * 10
+        frame[0] = 0x3A
+        frame[1] = self._encode_xinchi_status0(status)
+        frame[2] = status.soc_percent & 0xFF
+        frame[3] = status.xinchi_cycle_count & 0xFF
+        frame[4] = (status.xinchi_cycle_count >> 8) & 0xFF
+        frame[5] = status.xinchi_temperature_c & 0xFF
+        frame[6] = voltage_raw & 0xFF
+        frame[7] = (voltage_raw >> 8) & 0xFF
+        frame[8] = status.xinchi_total_current_a & 0xFF
+        frame[9] = self._sum_checksum(frame[:9])
+        return True, frame, ""
+
     def _encode_ruilun_status1(self, status: StatusBits) -> int:
         value = 0
         if status.distance_mode:
@@ -535,6 +594,24 @@ class ProtocolHandler:
         if status.p_gear_protect:
             value |= 0x08
         value |= self._encode_dongwei_voltage_state(status)
+        return value
+
+    def _encode_xinchi_status0(self, status: StatusBits) -> int:
+        value = 0
+        if status.xinchi_charge_mos:
+            value |= 0x80
+        if status.xinchi_discharge_mos:
+            value |= 0x40
+        if status.xinchi_high_temp_fault:
+            value |= 0x20
+        if status.xinchi_low_temp_fault:
+            value |= 0x10
+        if status.xinchi_over_voltage_fault:
+            value |= 0x08
+        if status.xinchi_under_voltage_fault:
+            value |= 0x04
+        if status.xinchi_bms_fault:
+            value |= 0x01
         return value
 
     def _encode_generic_status2(self, status: StatusBits, include_walk_mode: bool = False) -> int:
@@ -705,6 +782,9 @@ class ProtocolHandler:
             checksum ^= value
         return checksum & 0xFF
 
+    def _sum_checksum(self, payload: List[int]) -> int:
+        return sum(payload) & 0xFF
+
     def _copy_status(self, status: StatusBits) -> StatusBits:
         copied = StatusBits()
         for field_name in status.__dataclass_fields__:
@@ -712,7 +792,7 @@ class ProtocolHandler:
         return copied
 
     def get_byte_descriptions(self, protocol_name: str) -> List[str]:
-        """获取某个协议的 DATA0~DATA11 描述。"""
+        """获取某个协议的字节描述。"""
 
         descriptions: Dict[str, List[str]] = {
             PROTOCOL_RUILUN: [
@@ -813,13 +893,25 @@ class ProtocolHandler:
                 "Status9 电流百分比",
                 "校验和 (XOR)",
             ],
+            PROTOCOL_XINCHI: [
+                "ID (固定 0x3A)",
+                "Byte0 BMS当前状态",
+                "Byte1 SOC",
+                "Byte2 循环次数低字节",
+                "Byte3 循环次数高字节",
+                "Byte4 电池温度(有符号)",
+                "Byte5 总电压低字节(0.1V)",
+                "Byte6 总电压高字节(0.1V)",
+                "Byte7 总电流(A)",
+                "CheckSum 累加和",
+            ],
         }
         return descriptions.get(protocol_name, descriptions[PROTOCOL_RUILUN])
 
     def format_frame_display(self, frame: List[int]) -> str:
         """格式化显示帧数据。"""
 
-        if len(frame) != 12:
+        if not frame:
             return "无效帧数据"
 
         display_lines = [
@@ -1082,4 +1174,42 @@ class PresetScenarios:
         status.under_voltage = True
         status.side_stand = True
         status.p_gear_protect = True
+        return status
+
+    @staticmethod
+    def xinchi_normal_running() -> StatusBits:
+        status = StatusBits(protocol_name=PROTOCOL_XINCHI)
+        status.xinchi_charge_mos = True
+        status.xinchi_discharge_mos = True
+        status.soc_percent = 80
+        status.xinchi_cycle_count = 126
+        status.xinchi_temperature_c = 28
+        status.xinchi_total_voltage_v = 54.3
+        status.xinchi_total_current_a = 18
+        return status
+
+    @staticmethod
+    def xinchi_energy_recovery() -> StatusBits:
+        status = StatusBits(protocol_name=PROTOCOL_XINCHI)
+        status.xinchi_charge_mos = True
+        status.xinchi_discharge_mos = False
+        status.soc_percent = 62
+        status.xinchi_cycle_count = 144
+        status.xinchi_temperature_c = 32
+        status.xinchi_total_voltage_v = 55.1
+        status.xinchi_total_current_a = 8
+        return status
+
+    @staticmethod
+    def xinchi_fault_scenario() -> StatusBits:
+        status = StatusBits(protocol_name=PROTOCOL_XINCHI)
+        status.xinchi_high_temp_fault = True
+        status.xinchi_over_voltage_fault = True
+        status.xinchi_under_voltage_fault = True
+        status.xinchi_bms_fault = True
+        status.soc_percent = 15
+        status.xinchi_cycle_count = 318
+        status.xinchi_temperature_c = 75
+        status.xinchi_total_voltage_v = 42.0
+        status.xinchi_total_current_a = 0
         return status

@@ -6,6 +6,7 @@ from protocol.protocol_handler import (
     PROTOCOL_HANGZHOU_ANXIAN,
     PROTOCOL_RUILUN,
     PROTOCOL_WUXI_YIGE,
+    PROTOCOL_XINCHI,
     PROTOCOL_XINRI,
     PROTOCOL_YADEA,
     PresetScenarios,
@@ -148,6 +149,24 @@ class ProtocolHandlerTests(unittest.TestCase):
         self.assertEqual(send_frame, [48, 1, 0, 62, 126, 62, 15, 95, 114, 142, 64, 163])
         self.assertEqual(next_preview_frame, [48, 2, 0, 0, 64, 0, 15, 33, 52, 80, 2, 58])
 
+    def test_xinchi_frame_uses_sum_checksum_and_little_endian_fields(self):
+        status = StatusBits(protocol_name=PROTOCOL_XINCHI)
+        status.xinchi_charge_mos = True
+        status.xinchi_discharge_mos = True
+        status.xinchi_low_temp_fault = True
+        status.xinchi_under_voltage_fault = True
+        status.xinchi_bms_fault = True
+        status.soc_percent = 88
+        status.xinchi_cycle_count = 0x1234
+        status.xinchi_temperature_c = -5
+        status.xinchi_total_voltage_v = 54.3
+        status.xinchi_total_current_a = 36
+
+        success, frame, error = self.handler.generate_frame_for_preview(status)
+
+        self.assertTrue(success, error)
+        self.assertEqual(frame, [58, 213, 88, 52, 18, 251, 31, 2, 36, 237])
+
     def test_supported_protocols_have_byte_descriptions(self):
         for protocol_name in (
             PROTOCOL_RUILUN,
@@ -157,9 +176,13 @@ class ProtocolHandlerTests(unittest.TestCase):
             PROTOCOL_WUXI_YIGE,
             PROTOCOL_YADEA,
             PROTOCOL_DONGWEI_GTXH,
+            PROTOCOL_XINCHI,
         ):
             descriptions = self.handler.get_byte_descriptions(protocol_name)
-            self.assertEqual(len(descriptions), 12)
+            self.assertEqual(
+                len(descriptions),
+                self.handler.get_protocol_frame_length(protocol_name),
+            )
 
 
 if __name__ == "__main__":

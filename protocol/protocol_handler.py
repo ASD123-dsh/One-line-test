@@ -17,6 +17,7 @@ PROTOCOL_WUXI_YIGE = "无锡一格Y67协议"
 PROTOCOL_YADEA = "雅迪协议"
 PROTOCOL_DONGWEI_GTXH = "东威GTXH协议"
 PROTOCOL_XINCHI = "芯驰BMS协议"
+PROTOCOL_LITHIUM_BMS = "一线通--锂电池BMS"
 
 SUPPORTED_PROTOCOLS = [
     PROTOCOL_RUILUN,
@@ -27,6 +28,7 @@ SUPPORTED_PROTOCOLS = [
     PROTOCOL_YADEA,
     PROTOCOL_DONGWEI_GTXH,
     PROTOCOL_XINCHI,
+    PROTOCOL_LITHIUM_BMS,
 ]
 
 VOLTAGE_OPTIONS = (
@@ -144,6 +146,20 @@ class StatusBits:
     xinchi_temperature_c: int = 25
     xinchi_total_voltage_v: float = 48.0
     xinchi_total_current_a: int = 0
+
+    # 一线通锂电池 BMS
+    lithium_bms_alarm_enable: bool = False
+    lithium_bms_high_temp_alarm: bool = False
+    lithium_bms_low_temp_alarm: bool = False
+    lithium_bms_soh_low: bool = False
+    lithium_bms_mos_fault: bool = False
+    lithium_bms_short_circuit_fault: bool = False
+    lithium_bms_cycle_count: int = 0
+    lithium_bms_max_temp_c: int = 25
+    lithium_bms_min_temp_c: int = 20
+    lithium_bms_total_voltage_v: float = 48.0
+    lithium_bms_max_cell_voltage_v: float = 3.60
+    lithium_bms_min_cell_voltage_v: float = 3.40
 
 
 class ProtocolHandler:
@@ -270,6 +286,29 @@ class ProtocolHandler:
             if not (0 <= status.xinchi_total_current_a <= 255):
                 return False, "芯驰总电流必须在 0A 到 255A 范围内"
 
+        if protocol_name == PROTOCOL_LITHIUM_BMS:
+            if not (0 <= status.lithium_bms_cycle_count <= 65535):
+                return False, "锂电池BMS循环次数必须在 0-65535 范围内"
+            if not (-127 <= status.lithium_bms_max_temp_c <= 127):
+                return False, "锂电池BMS最高温度必须在 -127℃ 到 127℃ 范围内"
+            if not (-127 <= status.lithium_bms_min_temp_c <= 127):
+                return False, "锂电池BMS最低温度必须在 -127℃ 到 127℃ 范围内"
+            if not (0 <= status.lithium_bms_total_voltage_v <= 100):
+                return False, "锂电池BMS总压必须在 0V 到 100V 范围内"
+            if (
+                status.lithium_bms_max_cell_voltage_v
+                < status.lithium_bms_min_cell_voltage_v
+            ):
+                return False, "锂电池BMS最高电芯电压不能小于最低电芯电压"
+            if not self._is_lithium_bms_cell_voltage_encodable(
+                status.lithium_bms_max_cell_voltage_v
+            ):
+                return False, "锂电池BMS最高电芯电压必须在 1.85V 到 4.40V 范围内"
+            if not self._is_lithium_bms_cell_voltage_encodable(
+                status.lithium_bms_min_cell_voltage_v
+            ):
+                return False, "锂电池BMS最低电芯电压必须在 1.85V 到 4.40V 范围内"
+
         return True, ""
 
     def xinsiwei_pluscode_encrypt(self, data_bytes: List[int]) -> int:
@@ -336,6 +375,8 @@ class ProtocolHandler:
             return self._generate_dongwei_gtxh_frame(status)
         if protocol_name == PROTOCOL_XINCHI:
             return self._generate_xinchi_frame(status)
+        if protocol_name == PROTOCOL_LITHIUM_BMS:
+            return self._generate_lithium_bms_frame(status)
         return self._generate_ruilun_frame(status)
 
     def generate_frame_for_preview(self, status: StatusBits) -> Tuple[bool, List[int], str]:
@@ -356,6 +397,8 @@ class ProtocolHandler:
             return self._generate_dongwei_gtxh_frame(status)
         if protocol_name == PROTOCOL_XINCHI:
             return self._generate_xinchi_frame(status)
+        if protocol_name == PROTOCOL_LITHIUM_BMS:
+            return self._generate_lithium_bms_frame(status)
         return self._generate_ruilun_frame(status)
 
     def _generate_ruilun_frame(self, status: StatusBits) -> Tuple[bool, List[int], str]:
@@ -553,6 +596,26 @@ class ProtocolHandler:
         frame[9] = self._sum_checksum(frame[:9])
         return True, frame, ""
 
+    def _generate_lithium_bms_frame(self, status: StatusBits) -> Tuple[bool, List[int], str]:
+        is_valid, error_msg = self.validate_status_bits(status)
+        if not is_valid:
+            return False, [], error_msg
+
+        frame = [0] * 12
+        frame[0] = 0x03
+        frame[1] = 0x01
+        frame[2] = self._encode_lithium_bms_status1(status)
+        frame[3] = self._encode_lithium_bms_cell_voltage(status.lithium_bms_max_cell_voltage_v)
+        frame[4] = status.soc_percent & 0xFF
+        frame[5] = max(0, min(255, int(round(status.lithium_bms_total_voltage_v))))
+        frame[6] = self._encode_lithium_bms_temperature(status.lithium_bms_max_temp_c)
+        frame[7] = self._encode_lithium_bms_temperature(status.lithium_bms_min_temp_c)
+        frame[8] = (status.lithium_bms_cycle_count >> 8) & 0xFF
+        frame[9] = status.lithium_bms_cycle_count & 0xFF
+        frame[10] = self._encode_lithium_bms_cell_voltage(status.lithium_bms_min_cell_voltage_v)
+        frame[11] = self._xor_checksum(frame[:11])
+        return True, frame, ""
+
     def _encode_ruilun_status1(self, status: StatusBits) -> int:
         value = 0
         if status.distance_mode:
@@ -612,6 +675,22 @@ class ProtocolHandler:
             value |= 0x04
         if status.xinchi_bms_fault:
             value |= 0x01
+        return value
+
+    def _encode_lithium_bms_status1(self, status: StatusBits) -> int:
+        value = 0
+        if status.lithium_bms_alarm_enable:
+            value |= 0x80
+        if status.lithium_bms_high_temp_alarm:
+            value |= 0x40
+        if status.lithium_bms_low_temp_alarm:
+            value |= 0x20
+        if status.lithium_bms_soh_low:
+            value |= 0x10
+        if status.lithium_bms_mos_fault:
+            value |= 0x08
+        if status.lithium_bms_short_circuit_fault:
+            value |= 0x04
         return value
 
     def _encode_generic_status2(self, status: StatusBits, include_walk_mode: bool = False) -> int:
@@ -726,6 +805,20 @@ class ProtocolHandler:
         if status.voltage_96v:
             return 0x05
         return 0x00
+
+    def _is_lithium_bms_cell_voltage_encodable(self, voltage_v: float) -> bool:
+        raw_value = int(round(voltage_v * 100)) - 185
+        return 0 <= raw_value <= 255
+
+    def _encode_lithium_bms_cell_voltage(self, voltage_v: float) -> int:
+        raw_value = int(round(voltage_v * 100)) - 185
+        return max(0, min(255, raw_value))
+
+    def _encode_lithium_bms_temperature(self, temp_c: int) -> int:
+        magnitude = min(127, abs(int(temp_c)))
+        if temp_c < 0:
+            return 0x80 | magnitude
+        return magnitude & 0x7F
 
     def _encode_xinsiwei_status1(self, status: StatusBits) -> int:
         value = 0
@@ -904,6 +997,20 @@ class ProtocolHandler:
                 "Byte6 总电压高字节(0.1V)",
                 "Byte7 总电流(A)",
                 "CheckSum 累加和",
+            ],
+            PROTOCOL_LITHIUM_BMS: [
+                "设备编码 (固定 0x03)",
+                "通讯指令/配置 (固定 0x01)",
+                "Status1 故障状态",
+                "Status2 最高电芯电压 (10mV, 偏移 185)",
+                "Status3 SOC 电量",
+                "Status4 总压 (1V)",
+                "Status5 最高电池温度",
+                "Status6 最低电池温度",
+                "Status7 循环次数高字节",
+                "Status8 循环次数低字节",
+                "Status9 最低电芯电压 (10mV, 偏移 185)",
+                "校验和 (XOR)",
             ],
         }
         return descriptions.get(protocol_name, descriptions[PROTOCOL_RUILUN])
@@ -1212,4 +1319,48 @@ class PresetScenarios:
         status.xinchi_temperature_c = 75
         status.xinchi_total_voltage_v = 42.0
         status.xinchi_total_current_a = 0
+        return status
+
+    @staticmethod
+    def lithium_bms_normal_running() -> StatusBits:
+        status = StatusBits(protocol_name=PROTOCOL_LITHIUM_BMS)
+        status.lithium_bms_alarm_enable = True
+        status.soc_percent = 80
+        status.lithium_bms_cycle_count = 126
+        status.lithium_bms_max_temp_c = 28
+        status.lithium_bms_min_temp_c = 22
+        status.lithium_bms_total_voltage_v = 54
+        status.lithium_bms_max_cell_voltage_v = 3.61
+        status.lithium_bms_min_cell_voltage_v = 3.42
+        return status
+
+    @staticmethod
+    def lithium_bms_energy_recovery() -> StatusBits:
+        status = StatusBits(protocol_name=PROTOCOL_LITHIUM_BMS)
+        status.lithium_bms_alarm_enable = True
+        status.soc_percent = 62
+        status.lithium_bms_cycle_count = 144
+        status.lithium_bms_max_temp_c = 31
+        status.lithium_bms_min_temp_c = 24
+        status.lithium_bms_total_voltage_v = 55
+        status.lithium_bms_max_cell_voltage_v = 3.68
+        status.lithium_bms_min_cell_voltage_v = 3.50
+        return status
+
+    @staticmethod
+    def lithium_bms_fault_scenario() -> StatusBits:
+        status = StatusBits(protocol_name=PROTOCOL_LITHIUM_BMS)
+        status.lithium_bms_alarm_enable = True
+        status.lithium_bms_high_temp_alarm = True
+        status.lithium_bms_low_temp_alarm = True
+        status.lithium_bms_soh_low = True
+        status.lithium_bms_mos_fault = True
+        status.lithium_bms_short_circuit_fault = True
+        status.soc_percent = 15
+        status.lithium_bms_cycle_count = 318
+        status.lithium_bms_max_temp_c = 78
+        status.lithium_bms_min_temp_c = -8
+        status.lithium_bms_total_voltage_v = 43
+        status.lithium_bms_max_cell_voltage_v = 4.18
+        status.lithium_bms_min_cell_voltage_v = 2.96
         return status

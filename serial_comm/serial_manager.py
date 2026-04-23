@@ -149,7 +149,7 @@ class SerialManager(QObject):
         发送单帧数据
         
         Args:
-            frame_data: 12字节帧数据
+            frame_data: 协议帧数据
             skip_ui_update: 是否跳过UI更新（用于高频发送优化）
             
         Returns:
@@ -158,8 +158,9 @@ class SerialManager(QObject):
         if not self.is_connected or not self.serial_port:
             return False, "串口未连接"
         
-        if len(frame_data) != 12:
-            return False, "数据长度必须为12字节"
+        expected_length = len(frame_data)
+        if expected_length == 0:
+            return False, "数据不能为空"
         
         try:
             # 转换为字节数组
@@ -168,7 +169,7 @@ class SerialManager(QObject):
             # 发送数据
             bytes_written = self.serial_port.write(data_bytes)
             
-            if bytes_written == 12:
+            if bytes_written == expected_length:
                 # 发送成功，使用异步方式处理空闲延迟
                 idle_time_ms = (32 * self.tosc_us) / 1000.0
                 
@@ -183,7 +184,9 @@ class SerialManager(QObject):
                 
                 return True, ""
             else:
-                error_msg = f"数据发送不完整，期望12字节，实际发送{bytes_written}字节"
+                error_msg = (
+                    f"数据发送不完整，期望{expected_length}字节，实际发送{bytes_written}字节"
+                )
                 if not skip_ui_update:
                     self.send_error.emit(error_msg)
                 return False, error_msg
@@ -209,7 +212,7 @@ class SerialManager(QObject):
         开始循环发送数据
         
         Args:
-            frame_data: 12字节帧数据
+            frame_data: 协议帧数据
             interval_ms: 发送间隔（毫秒）
             
         Returns:
@@ -218,8 +221,8 @@ class SerialManager(QObject):
         if not self.is_connected:
             return False, "串口未连接"
         
-        if len(frame_data) != 12:
-            return False, "数据长度必须为12字节"
+        if len(frame_data) == 0:
+            return False, "数据不能为空"
         
         if not (500 <= interval_ms <= 5000):
             return False, "发送间隔必须在500ms-5000ms范围内"

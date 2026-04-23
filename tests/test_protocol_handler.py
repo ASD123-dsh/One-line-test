@@ -4,6 +4,7 @@ from protocol.protocol_handler import (
     PROTOCOL_CHANGZHOU_XINSIWEI,
     PROTOCOL_DONGWEI_GTXH,
     PROTOCOL_HANGZHOU_ANXIAN,
+    PROTOCOL_LITHIUM_BMS,
     PROTOCOL_RUILUN,
     PROTOCOL_WUXI_YIGE,
     PROTOCOL_XINCHI,
@@ -167,6 +168,25 @@ class ProtocolHandlerTests(unittest.TestCase):
         self.assertTrue(success, error)
         self.assertEqual(frame, [58, 213, 88, 52, 18, 251, 31, 2, 36, 237])
 
+    def test_lithium_bms_frame_uses_xor_checksum_and_signed_temperature_encoding(self):
+        status = StatusBits(protocol_name=PROTOCOL_LITHIUM_BMS)
+        status.lithium_bms_alarm_enable = True
+        status.lithium_bms_high_temp_alarm = True
+        status.lithium_bms_soh_low = True
+        status.lithium_bms_short_circuit_fault = True
+        status.lithium_bms_max_cell_voltage_v = 3.61
+        status.soc_percent = 80
+        status.lithium_bms_total_voltage_v = 54
+        status.lithium_bms_max_temp_c = 28
+        status.lithium_bms_min_temp_c = -5
+        status.lithium_bms_cycle_count = 0x1234
+        status.lithium_bms_min_cell_voltage_v = 3.42
+
+        success, frame, error = self.handler.generate_frame_for_preview(status)
+
+        self.assertTrue(success, error)
+        self.assertEqual(frame, [3, 1, 212, 176, 80, 54, 28, 133, 18, 52, 157, 34])
+
     def test_supported_protocols_have_byte_descriptions(self):
         for protocol_name in (
             PROTOCOL_RUILUN,
@@ -177,6 +197,7 @@ class ProtocolHandlerTests(unittest.TestCase):
             PROTOCOL_YADEA,
             PROTOCOL_DONGWEI_GTXH,
             PROTOCOL_XINCHI,
+            PROTOCOL_LITHIUM_BMS,
         ):
             descriptions = self.handler.get_byte_descriptions(protocol_name)
             self.assertEqual(

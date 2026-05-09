@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from PyQt5.QtCore import QCoreApplication
 
-from serial_comm.serial_manager import SerialManager
+from serial_comm.serial_manager import SEND_MODE_BATTERY_SINGLE_WIRE, SerialManager
 
 
 _APP = QCoreApplication.instance() or QCoreApplication([])
@@ -13,12 +13,23 @@ class FakeSerialPort:
     def __init__(self, bytes_written=None):
         self.bytes_written = bytes_written
         self.last_payload = None
+        self.break_history = []
+        self._break_condition = False
 
     def write(self, payload):
         self.last_payload = payload
         if self.bytes_written is not None:
             return self.bytes_written
         return len(payload)
+
+    @property
+    def break_condition(self):
+        return self._break_condition
+
+    @break_condition.setter
+    def break_condition(self, value):
+        self._break_condition = value
+        self.break_history.append(value)
 
 
 class SerialManagerTests(unittest.TestCase):
@@ -57,6 +68,47 @@ class SerialManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.cyclic_data, frame_data)
         self.assertEqual(self.manager.send_interval_ms, 1000)
         mock_start.assert_called_once_with(1000)
+
+    def test_battery_single_wire_cyclic_send_requires_protocol_interval(self):
+        frame_data = [0x00, 0x50, 0x00, 0x00, 0x00, 0x50]
+
+        success, error = self.manager.start_cyclic_send(
+            frame_data,
+            500,
+            send_mode=SEND_MODE_BATTERY_SINGLE_WIRE,
+        )
+
+        self.assertFalse(success)
+        self.assertEqual(error, "电池单线通讯协议发送间隔必须在1000ms-2000ms范围内")
+
+        with patch.object(self.manager.send_timer, "start") as mock_start:
+            success, error = self.manager.start_cyclic_send(
+                frame_data,
+                2000,
+                send_mode=SEND_MODE_BATTERY_SINGLE_WIRE,
+            )
+
+        self.assertTrue(success, error)
+        self.assertEqual(self.manager.cyclic_send_mode, SEND_MODE_BATTERY_SINGLE_WIRE)
+        mock_start.assert_called_once_with(2000)
+
+    def test_battery_single_wire_mode_uses_break_condition_pulses(self):
+        frame_data = [0x00, 0x01, 0x00, 0x00, 0x00, 0x01]
+
+        with patch.object(self.manager, "_sleep_ms") as mock_sleep:
+            success, error = self.manager.send_single_frame(
+                frame_data,
+                skip_ui_update=True,
+                send_mode=SEND_MODE_BATTERY_SINGLE_WIRE,
+            )
+
+        self.assertTrue(success, error)
+        self.assertEqual(error, "")
+        self.assertIsNone(self.manager.serial_port.last_payload)
+        self.assertEqual(self.manager.serial_port.break_history[:4], [True, False, True, False])
+        self.assertEqual(self.manager.serial_port.break_history[-1], True)
+        self.assertEqual([call.args[0] for call in mock_sleep.call_args_list[:4]], [62, 2, 4, 2])
+        self.assertEqual(mock_sleep.call_args_list[-1].args[0], 20)
 
 
 if __name__ == "__main__":

@@ -18,6 +18,7 @@ PROTOCOL_YADEA = "雅迪协议"
 PROTOCOL_DONGWEI_GTXH = "东威GTXH协议"
 PROTOCOL_XINCHI = "芯驰BMS协议"
 PROTOCOL_LITHIUM_BMS = "一线通--锂电池BMS"
+PROTOCOL_BATTERY_SINGLE_WIRE = "电池单线通讯协议"
 
 SUPPORTED_PROTOCOLS = [
     PROTOCOL_RUILUN,
@@ -29,6 +30,7 @@ SUPPORTED_PROTOCOLS = [
     PROTOCOL_DONGWEI_GTXH,
     PROTOCOL_XINCHI,
     PROTOCOL_LITHIUM_BMS,
+    PROTOCOL_BATTERY_SINGLE_WIRE,
 ]
 
 VOLTAGE_OPTIONS = (
@@ -184,12 +186,25 @@ class ProtocolHandler:
     def get_protocol_frame_length(self, protocol_name: str) -> int:
         """获取协议帧长度。"""
 
-        return 10 if protocol_name == PROTOCOL_XINCHI else 12
+        if protocol_name == PROTOCOL_BATTERY_SINGLE_WIRE:
+            return 6
+        if protocol_name == PROTOCOL_XINCHI:
+            return 10
+        return 12
 
     def get_protocol_checksum_mode(self, protocol_name: str) -> str:
         """获取协议校验模式。"""
 
-        return "sum" if protocol_name == PROTOCOL_XINCHI else "xor"
+        if protocol_name in {PROTOCOL_XINCHI, PROTOCOL_BATTERY_SINGLE_WIRE}:
+            return "sum"
+        return "xor"
+
+    def get_protocol_send_mode(self, protocol_name: str) -> str:
+        """获取协议的串口发送模式。"""
+
+        if protocol_name == PROTOCOL_BATTERY_SINGLE_WIRE:
+            return "battery_single_wire"
+        return "uart"
 
     def get_current_xinsiwei_sequence(self) -> int:
         """获取当前常州新思维序号。"""
@@ -275,6 +290,11 @@ class ProtocolHandler:
             0 <= status.xinsiwei_sequence <= 4095
         ):
             return False, "常州新思维序号必须在 0-4095 范围内"
+
+        if protocol_name == PROTOCOL_BATTERY_SINGLE_WIRE and not (
+            0 <= status.soc_percent <= 100
+        ):
+            return False, "电池单线通讯协议 SOC 必须在 0-100 范围内"
 
         if protocol_name == PROTOCOL_XINCHI:
             if not (0 <= status.xinchi_cycle_count <= 65535):
@@ -377,6 +397,8 @@ class ProtocolHandler:
             return self._generate_xinchi_frame(status)
         if protocol_name == PROTOCOL_LITHIUM_BMS:
             return self._generate_lithium_bms_frame(status)
+        if protocol_name == PROTOCOL_BATTERY_SINGLE_WIRE:
+            return self._generate_battery_single_wire_frame(status)
         return self._generate_ruilun_frame(status)
 
     def generate_frame_for_preview(self, status: StatusBits) -> Tuple[bool, List[int], str]:
@@ -399,6 +421,8 @@ class ProtocolHandler:
             return self._generate_xinchi_frame(status)
         if protocol_name == PROTOCOL_LITHIUM_BMS:
             return self._generate_lithium_bms_frame(status)
+        if protocol_name == PROTOCOL_BATTERY_SINGLE_WIRE:
+            return self._generate_battery_single_wire_frame(status)
         return self._generate_ruilun_frame(status)
 
     def _generate_ruilun_frame(self, status: StatusBits) -> Tuple[bool, List[int], str]:
@@ -614,6 +638,22 @@ class ProtocolHandler:
         frame[9] = status.lithium_bms_cycle_count & 0xFF
         frame[10] = self._encode_lithium_bms_cell_voltage(status.lithium_bms_min_cell_voltage_v)
         frame[11] = self._xor_checksum(frame[:11])
+        return True, frame, ""
+
+    def _generate_battery_single_wire_frame(
+        self, status: StatusBits
+    ) -> Tuple[bool, List[int], str]:
+        is_valid, error_msg = self.validate_status_bits(status)
+        if not is_valid:
+            return False, [], error_msg
+
+        frame = [0] * 6
+        frame[0] = 0x00
+        frame[1] = status.soc_percent & 0xFF
+        frame[2] = 0x00
+        frame[3] = 0x00
+        frame[4] = 0x00
+        frame[5] = self._sum_checksum(frame[:5])
         return True, frame, ""
 
     def _encode_ruilun_status1(self, status: StatusBits) -> int:
@@ -1012,6 +1052,14 @@ class ProtocolHandler:
                 "Status9 最低电芯电压 (10mV, 偏移 185)",
                 "校验和 (XOR)",
             ],
+            PROTOCOL_BATTERY_SINGLE_WIRE: [
+                "BYTE1 固定 0x00",
+                "BYTE2 电池剩余容量 SOC",
+                "BYTE3 固定 0x00",
+                "BYTE4 固定 0x00",
+                "BYTE5 固定 0x00",
+                "BYTE6 8 位累加校验和",
+            ],
         }
         return descriptions.get(protocol_name, descriptions[PROTOCOL_RUILUN])
 
@@ -1363,4 +1411,22 @@ class PresetScenarios:
         status.lithium_bms_total_voltage_v = 43
         status.lithium_bms_max_cell_voltage_v = 4.18
         status.lithium_bms_min_cell_voltage_v = 2.96
+        return status
+
+    @staticmethod
+    def battery_single_wire_normal_running() -> StatusBits:
+        status = StatusBits(protocol_name=PROTOCOL_BATTERY_SINGLE_WIRE)
+        status.soc_percent = 80
+        return status
+
+    @staticmethod
+    def battery_single_wire_energy_recovery() -> StatusBits:
+        status = StatusBits(protocol_name=PROTOCOL_BATTERY_SINGLE_WIRE)
+        status.soc_percent = 62
+        return status
+
+    @staticmethod
+    def battery_single_wire_fault_scenario() -> StatusBits:
+        status = StatusBits(protocol_name=PROTOCOL_BATTERY_SINGLE_WIRE)
+        status.soc_percent = 15
         return status

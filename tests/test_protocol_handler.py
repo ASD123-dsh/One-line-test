@@ -1,6 +1,7 @@
 import unittest
 
 from protocol.protocol_handler import (
+    PROTOCOL_BATTERY_SINGLE_WIRE,
     PROTOCOL_CHANGZHOU_XINSIWEI,
     PROTOCOL_DONGWEI_GTXH,
     PROTOCOL_HANGZHOU_ANXIAN,
@@ -187,6 +188,19 @@ class ProtocolHandlerTests(unittest.TestCase):
         self.assertTrue(success, error)
         self.assertEqual(frame, [3, 1, 212, 176, 80, 54, 28, 133, 18, 52, 157, 34])
 
+    def test_battery_single_wire_frame_uses_six_bytes_and_sum_checksum(self):
+        status = StatusBits(protocol_name=PROTOCOL_BATTERY_SINGLE_WIRE)
+        status.soc_percent = 88
+
+        success, frame, error = self.handler.generate_frame_for_preview(status)
+
+        self.assertTrue(success, error)
+        self.assertEqual(frame, [0, 88, 0, 0, 0, 88])
+        self.assertEqual(
+            self.handler.get_protocol_send_mode(PROTOCOL_BATTERY_SINGLE_WIRE),
+            "battery_single_wire",
+        )
+
     def test_supported_protocols_have_byte_descriptions(self):
         for protocol_name in (
             PROTOCOL_RUILUN,
@@ -198,6 +212,7 @@ class ProtocolHandlerTests(unittest.TestCase):
             PROTOCOL_DONGWEI_GTXH,
             PROTOCOL_XINCHI,
             PROTOCOL_LITHIUM_BMS,
+            PROTOCOL_BATTERY_SINGLE_WIRE,
         ):
             descriptions = self.handler.get_byte_descriptions(protocol_name)
             self.assertEqual(

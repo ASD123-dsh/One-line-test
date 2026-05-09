@@ -16,6 +16,10 @@ from typing import List, Tuple, Optional, Callable
 from PyQt5.QtCore import QObject, pyqtSignal, QTimer
 from dataclasses import dataclass
 
+SEND_MODE_UART = "uart"
+SEND_MODE_BATTERY_SINGLE_WIRE = "battery_single_wire"
+
+
 @dataclass
 class SerialPortInfo:
     """串口信息"""
@@ -45,6 +49,7 @@ class SerialManager(QObject):
         
         # 发送参数
         self.cyclic_data: Optional[List[int]] = None
+        self.cyclic_send_mode = SEND_MODE_UART
         self.send_interval_ms = 1000
         self.tosc_us = 100
         
@@ -132,6 +137,7 @@ class SerialManager(QObject):
             
             if self.serial_port and self.serial_port.is_open:
                 port_name = self.serial_port.port
+                self._set_tx_low(False)
                 self.serial_port.close()
                 self.is_connected = False
                 self.port_disconnected.emit(port_name)
@@ -144,7 +150,12 @@ class SerialManager(QObject):
             # 断开串口失败，返回False
             return False
     
-    def send_single_frame(self, frame_data: List[int], skip_ui_update: bool = False) -> Tuple[bool, str]:
+    def send_single_frame(
+        self,
+        frame_data: List[int],
+        skip_ui_update: bool = False,
+        send_mode: str = SEND_MODE_UART,
+    ) -> Tuple[bool, str]:
         """
         发送单帧数据
         
@@ -161,8 +172,14 @@ class SerialManager(QObject):
         expected_length = len(frame_data)
         if expected_length == 0:
             return False, "数据不能为空"
-        
+
+        if send_mode == SEND_MODE_BATTERY_SINGLE_WIRE:
+            return self._send_battery_single_wire_frame(frame_data, skip_ui_update)
+        if send_mode != SEND_MODE_UART:
+            return False, f"不支持的发送模式: {send_mode}"
+
         try:
+            self._set_tx_low(False)
             # 转换为字节数组
             data_bytes = bytes(frame_data)
             
@@ -206,8 +223,60 @@ class SerialManager(QObject):
             if not skip_ui_update:
                 self.send_error.emit(error_msg)
             return False, error_msg
-    
-    def start_cyclic_send(self, frame_data: List[int], interval_ms: int = 1000) -> Tuple[bool, str]:
+
+    def _send_battery_single_wire_frame(
+        self, frame_data: List[int], skip_ui_update: bool = False
+    ) -> Tuple[bool, str]:
+        """按电池单线通讯协议的头码和脉宽发送 6 字节 SOC 帧。"""
+
+        if len(frame_data) != 6:
+            return False, "电池单线通讯协议帧长度必须为 6 字节"
+
+        try:
+            # 头码：低 62ms，高 2ms。
+            self._set_tx_low(True)
+            self._sleep_ms(62)
+            self._set_tx_low(False)
+            self._sleep_ms(2)
+
+            # 数据位：0 = 低 4ms + 高 2ms；1 = 低 2ms + 高 4ms。按低位先发。
+            for byte_value in frame_data:
+                for bit_index in range(8):
+                    bit_value = (byte_value >> bit_index) & 0x01
+                    low_ms = 2 if bit_value else 4
+                    high_ms = 4 if bit_value else 2
+                    self._set_tx_low(True)
+                    self._sleep_ms(low_ms)
+                    self._set_tx_low(False)
+                    self._sleep_ms(high_ms)
+
+            self._set_tx_low(True)
+            self._sleep_ms(20)
+
+            if not skip_ui_update:
+                timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                self.data_sent.emit(frame_data, timestamp)
+
+            return True, ""
+        except Exception as e:
+            error_msg = f"电池单线通讯协议发送失败: {str(e)}"
+            if not skip_ui_update:
+                self.send_error.emit(error_msg)
+            return False, error_msg
+
+    def _set_tx_low(self, is_low: bool):
+        if self.serial_port is not None:
+            self.serial_port.break_condition = bool(is_low)
+
+    def _sleep_ms(self, duration_ms: int):
+        time.sleep(duration_ms / 1000.0)
+
+    def start_cyclic_send(
+        self,
+        frame_data: List[int],
+        interval_ms: int = 1000,
+        send_mode: str = SEND_MODE_UART,
+    ) -> Tuple[bool, str]:
         """
         开始循环发送数据
         
@@ -224,11 +293,18 @@ class SerialManager(QObject):
         if len(frame_data) == 0:
             return False, "数据不能为空"
         
-        if not (500 <= interval_ms <= 5000):
+        if send_mode not in {SEND_MODE_UART, SEND_MODE_BATTERY_SINGLE_WIRE}:
+            return False, f"不支持的发送模式: {send_mode}"
+
+        if send_mode == SEND_MODE_BATTERY_SINGLE_WIRE:
+            if not (1000 <= interval_ms <= 2000):
+                return False, "电池单线通讯协议发送间隔必须在1000ms-2000ms范围内"
+        elif not (500 <= interval_ms <= 5000):
             return False, "发送间隔必须在500ms-5000ms范围内"
-        
+
         # 保存发送参数
         self.cyclic_data = frame_data.copy()
+        self.cyclic_send_mode = send_mode
         self.send_interval_ms = interval_ms
         
         # 启动定时器
@@ -240,6 +316,7 @@ class SerialManager(QObject):
         """停止循环发送"""
         self.send_timer.stop()
         self.cyclic_data = None
+        self.cyclic_send_mode = SEND_MODE_UART
     
     def _send_cyclic_data(self):
         """定时器回调：发送循环数据"""
@@ -255,7 +332,11 @@ class SerialManager(QObject):
                 skip_ui = (self.send_count % self.ui_update_interval) != 0
             
             # 发送数据
-            success, error_msg = self.send_single_frame(self.cyclic_data, skip_ui_update=skip_ui)
+            success, error_msg = self.send_single_frame(
+                self.cyclic_data,
+                skip_ui_update=skip_ui,
+                send_mode=self.cyclic_send_mode,
+            )
             
             # 如果跳过了UI更新但需要显示错误，仍然发送错误信号
             if skip_ui and not success:

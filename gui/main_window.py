@@ -21,6 +21,7 @@ from PyQt5.QtCore import Qt, QTimer, pyqtSlot
 from PyQt5.QtGui import QFont, QIcon, QPalette, QColor
 
 from protocol.protocol_handler import (
+    PROTOCOL_BATTERY_SINGLE_WIRE,
     PROTOCOL_CHANGZHOU_XINSIWEI,
     PROTOCOL_DONGWEI_GTXH,
     PROTOCOL_HANGZHOU_ANXIAN,
@@ -359,6 +360,7 @@ class MainWindow(QMainWindow):
                 PROTOCOL_DONGWEI_GTXH,
                 PROTOCOL_XINCHI,
                 PROTOCOL_LITHIUM_BMS,
+                PROTOCOL_BATTERY_SINGLE_WIRE,
             ]
         )
         self.protocol_combo.setCurrentText(PROTOCOL_RUILUN)
@@ -1042,6 +1044,8 @@ class MainWindow(QMainWindow):
     def on_protocol_changed(self, protocol_name):
         """协议切换处理"""
         self.current_protocol = protocol_name
+        self.custom_frame_data = None
+        self.apply_send_interval_constraints()
         
         # 根据协议类型切换Status配置界面
         if protocol_name == PROTOCOL_RUILUN:
@@ -1062,6 +1066,8 @@ class MainWindow(QMainWindow):
             self.switch_to_xinchi_protocol()
         elif protocol_name == PROTOCOL_LITHIUM_BMS:
             self.switch_to_lithium_bms_protocol()
+        elif protocol_name == PROTOCOL_BATTERY_SINGLE_WIRE:
+            self.switch_to_battery_single_wire_protocol()
         
         # 更新当前帧显示
         self.update_current_frame_display()
@@ -1149,6 +1155,28 @@ class MainWindow(QMainWindow):
         self.normal_radio.setChecked(True)
         self.on_scenario_changed()
 
+    def switch_to_battery_single_wire_protocol(self):
+        """切换到电池单线通讯协议"""
+        self.current_status = PresetScenarios.battery_single_wire_normal_running()
+        self.show_battery_single_wire_status_config()
+        self.normal_radio.setChecked(True)
+        self.on_scenario_changed()
+
+    def apply_send_interval_constraints(self):
+        """根据协议约束循环发送间隔。"""
+        if not hasattr(self, "interval_spin"):
+            return
+
+        if self.current_protocol == PROTOCOL_BATTERY_SINGLE_WIRE:
+            self.interval_spin.setRange(1000, 2000)
+            self.interval_spin.setValue(2000)
+            return
+
+        current_value = self.interval_spin.value()
+        self.interval_spin.setRange(500, 5000)
+        if not (500 <= current_value <= 5000):
+            self.interval_spin.setValue(1000)
+
     def show_ruilun_status_config(self):
         """显示瑞轮协议Status配置界面"""
         # 清除现有标签页
@@ -1230,6 +1258,13 @@ class MainWindow(QMainWindow):
         self.status_tabs.addTab(self.create_lithium_bms_battery_data_tab(), "电池数据")
         self._compact_status_tab_pages()
         self.connect_lithium_bms_status_signals()
+
+    def show_battery_single_wire_status_config(self):
+        """显示电池单线通讯协议配置界面。"""
+        self.status_tabs.clear()
+        self.status_tabs.addTab(self.create_battery_single_wire_data_tab(), "电池数据")
+        self._compact_status_tab_pages()
+        self.connect_battery_single_wire_status_signals()
 
     def create_xinchi_status_flags_tab(self) -> QWidget:
         """创建芯驰 BMS 状态页。"""
@@ -1377,6 +1412,19 @@ class MainWindow(QMainWindow):
         self.lithium_bms_min_cell_voltage_spin.setSingleStep(0.01)
         self.lithium_bms_min_cell_voltage_spin.setValue(3.40)
         layout.addWidget(self.lithium_bms_min_cell_voltage_spin, 6, 1)
+
+        return widget
+
+    def create_battery_single_wire_data_tab(self) -> QWidget:
+        """创建电池单线通讯协议数据页。"""
+        widget = QWidget()
+        layout = QGridLayout(widget)
+
+        layout.addWidget(QLabel("电池剩余容量 SOC (%):"), 0, 0)
+        self.battery_single_wire_soc_spin = QSpinBox()
+        self.battery_single_wire_soc_spin.setRange(0, 100)
+        self.battery_single_wire_soc_spin.setValue(80)
+        layout.addWidget(self.battery_single_wire_soc_spin, 0, 1)
 
         return widget
     
@@ -1848,6 +1896,10 @@ class MainWindow(QMainWindow):
         self.lithium_bms_cycle_count_spin.valueChanged.connect(self.update_current_frame_display)
         self.lithium_bms_min_cell_voltage_spin.valueChanged.connect(self.update_current_frame_display)
 
+    def connect_battery_single_wire_status_signals(self):
+        """连接电池单线通讯协议控件信号。"""
+        self.battery_single_wire_soc_spin.valueChanged.connect(self.update_current_frame_display)
+
     def connect_changzhou_xinsiwei_status_signals(self):
         """连接常州新思维协议状态信号"""
         # Status1 - 预留位D0-D3
@@ -1959,15 +2011,11 @@ class MainWindow(QMainWindow):
             self.status_tabs.setEnabled(False)
             self.frame_config_btn.setEnabled(True)
             
-            # 如果是从数据自定义场景切换过来，使用当前UI中的Status配置生成帧数据
-            if previous_scenario == 3:  # 从数据自定义切换过来
-                current_status = self.get_current_status_from_ui()
-                success, frame_data, _ = self.generate_protocol_frame(current_status)
-                if success:
-                    self.custom_frame_data = frame_data
-                else:
-                    # 如果生成失败，保持原有的自定义帧数据不变
-                    pass
+            frame_length = self.protocol_handler.get_protocol_frame_length(self.current_protocol)
+            if previous_scenario == 3 or self.custom_frame_data is None:
+                self.custom_frame_data = self._make_default_custom_frame()
+            elif len(self.custom_frame_data) != frame_length:
+                self.custom_frame_data = self._make_default_custom_frame()
         else:
             self.status_tabs.setEnabled(False)
             self.frame_config_btn.setEnabled(False)
@@ -1991,6 +2039,8 @@ class MainWindow(QMainWindow):
                 self.load_xinchi_preset_scenario(scenario_id)
             elif self.current_protocol == PROTOCOL_LITHIUM_BMS:
                 self.load_lithium_bms_preset_scenario(scenario_id)
+            elif self.current_protocol == PROTOCOL_BATTERY_SINGLE_WIRE:
+                self.load_battery_single_wire_preset_scenario(scenario_id)
         
         # 记录当前场景ID，用于下次切换时判断
         self._previous_scenario_id = scenario_id
@@ -2103,6 +2153,19 @@ class MainWindow(QMainWindow):
             self.current_status = StatusBits(protocol_name=PROTOCOL_LITHIUM_BMS)
 
         self.update_lithium_bms_ui_from_status()
+
+    def load_battery_single_wire_preset_scenario(self, scenario_id):
+        """加载电池单线通讯协议预设场景。"""
+        if scenario_id == 0:
+            self.current_status = PresetScenarios.battery_single_wire_normal_running()
+        elif scenario_id == 1:
+            self.current_status = PresetScenarios.battery_single_wire_energy_recovery()
+        elif scenario_id == 2:
+            self.current_status = PresetScenarios.battery_single_wire_fault_scenario()
+        else:
+            self.current_status = StatusBits(protocol_name=PROTOCOL_BATTERY_SINGLE_WIRE)
+
+        self.update_battery_single_wire_ui_from_status()
 
     def load_changzhou_xinsiwei_preset_scenario(self, scenario_id):
         """加载常州新思维协议预设场景"""
@@ -2492,6 +2555,16 @@ class MainWindow(QMainWindow):
             self.lithium_bms_min_cell_voltage_spin.setValue(
                 getattr(status, 'lithium_bms_min_cell_voltage_v', 3.40)
             )
+
+    def update_battery_single_wire_ui_from_status(self):
+        """根据电池单线通讯协议状态更新 UI。"""
+        if not hasattr(self, 'current_status') or not isinstance(self.current_status, StatusBits):
+            return
+
+        if hasattr(self, 'battery_single_wire_soc_spin'):
+            self.battery_single_wire_soc_spin.setValue(
+                getattr(self.current_status, 'soc_percent', 0)
+            )
     
     @pyqtSlot(bool)
     def on_soc_fault_toggled(self, checked):
@@ -2508,6 +2581,8 @@ class MainWindow(QMainWindow):
             return self.get_xinchi_status_from_ui()
         elif self.current_protocol == PROTOCOL_LITHIUM_BMS:
             return self.get_lithium_bms_status_from_ui()
+        elif self.current_protocol == PROTOCOL_BATTERY_SINGLE_WIRE:
+            return self.get_battery_single_wire_status_from_ui()
         else:
             return self.get_ruilun_status_from_ui()
     
@@ -2703,6 +2778,13 @@ class MainWindow(QMainWindow):
         status.lithium_bms_cycle_count = self.lithium_bms_cycle_count_spin.value()
         status.lithium_bms_min_cell_voltage_v = self.lithium_bms_min_cell_voltage_spin.value()
 
+        return status
+
+    def get_battery_single_wire_status_from_ui(self) -> StatusBits:
+        """从 UI 获取电池单线通讯协议配置。"""
+        status = StatusBits()
+        status.protocol_name = PROTOCOL_BATTERY_SINGLE_WIRE
+        status.soc_percent = self.battery_single_wire_soc_spin.value()
         return status
 
     def get_changzhou_xinsiwei_status_from_ui(self) -> StatusBits:
@@ -2915,7 +2997,8 @@ class MainWindow(QMainWindow):
                 return
         
         # 发送数据
-        success, error_msg = self.serial_manager.send_single_frame(frame_data)
+        send_mode = self.protocol_handler.get_protocol_send_mode(self.current_protocol)
+        success, error_msg = self.serial_manager.send_single_frame(frame_data, send_mode=send_mode)
         
         if not success:
             QMessageBox.critical(self, "发送失败", error_msg)
@@ -2954,7 +3037,10 @@ class MainWindow(QMainWindow):
             
             # 开始循环发送
             interval_ms = self.interval_spin.value()
-            success, error_msg = self.serial_manager.start_cyclic_send(frame_data, interval_ms)
+            send_mode = self.protocol_handler.get_protocol_send_mode(self.current_protocol)
+            success, error_msg = self.serial_manager.start_cyclic_send(
+                frame_data, interval_ms, send_mode=send_mode
+            )
             
             if success:
                 self.cyclic_send_btn.setText("停止发送")
@@ -3009,20 +3095,31 @@ class MainWindow(QMainWindow):
         self.history_text.clear()
         # 同时清空待更新的缓冲区
         self.pending_history_updates.clear()
+
+    def _make_default_custom_frame(self):
+        """按当前协议和当前 UI 状态生成全自定义模式的初始帧。"""
+        frame_length = self.protocol_handler.get_protocol_frame_length(self.current_protocol)
+
+        status = self.current_status
+        if self.custom_radio.isChecked():
+            try:
+                status = self.get_current_status_from_ui()
+            except Exception:
+                status = self.current_status
+
+        success, frame_data, _ = self.generate_protocol_frame_for_preview(status)
+        if success and len(frame_data) == frame_length:
+            return frame_data
+
+        return [0] * frame_length
     
     @pyqtSlot()
     def open_frame_config(self):
         """打开帧配置窗口"""
         frame_length = self.protocol_handler.get_protocol_frame_length(self.current_protocol)
 
-        if self.custom_frame_data is None:
-            success, frame_data, _ = self.generate_protocol_frame(self.current_status)
-            if success:
-                self.custom_frame_data = frame_data
-            else:
-                self.custom_frame_data = [0] * frame_length
-        elif len(self.custom_frame_data) != frame_length:
-            self.custom_frame_data = [0] * frame_length
+        if self.custom_frame_data is None or len(self.custom_frame_data) != frame_length:
+            self.custom_frame_data = self._make_default_custom_frame()
         
         byte_descriptions = self.protocol_handler.get_byte_descriptions(self.current_protocol)
         self.frame_config_dialog = FrameConfigDialog(

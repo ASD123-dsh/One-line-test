@@ -302,9 +302,14 @@ class MainWindow(QMainWindow):
 
         if isinstance(layout, QGridLayout):
             if is_root:
-                layout.setContentsMargins(10, 10, 10, 8)
-                layout.setHorizontalSpacing(18)
-                layout.setVerticalSpacing(8)
+                if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN:
+                    layout.setContentsMargins(8, 8, 8, 8)
+                    layout.setHorizontalSpacing(18)
+                    layout.setVerticalSpacing(6)
+                else:
+                    layout.setContentsMargins(10, 10, 10, 8)
+                    layout.setHorizontalSpacing(18)
+                    layout.setVerticalSpacing(8)
             else:
                 layout.setContentsMargins(8, 8, 8, 6)
                 layout.setHorizontalSpacing(12)
@@ -451,9 +456,23 @@ class MainWindow(QMainWindow):
         """创建瑞轮协议Status1配置标签页"""
         widget = QWidget()
         layout = QGridLayout(widget)
+        if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN:
+            layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+            layout.setContentsMargins(8, 8, 8, 8)
+            layout.setHorizontalSpacing(18)
+            layout.setVerticalSpacing(6)
+        if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN:
+            layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+            layout.setContentsMargins(8, 8, 8, 8)
+            layout.setHorizontalSpacing(18)
+            layout.setVerticalSpacing(6)
+        layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         
         protocol = self.current_protocol
         if protocol == PROTOCOL_HANGZHOU_ANXIAN:
+            layout.setContentsMargins(8, 8, 8, 8)
+            layout.setHorizontalSpacing(18)
+            layout.setVerticalSpacing(6)
             labels = [
                 ("备用 (D3)", False),
                 ("协议限速 (D2)", True),
@@ -499,11 +518,19 @@ class MainWindow(QMainWindow):
         
         self.p_gear_protect_cb = QCheckBox(labels[2][0])
         self.p_gear_protect_cb.setEnabled(labels[2][1])
-        layout.addWidget(self.p_gear_protect_cb, 1, 0)
+        layout.addWidget(
+            self.p_gear_protect_cb,
+            0 if protocol == PROTOCOL_HANGZHOU_ANXIAN else 1,
+            2 if protocol == PROTOCOL_HANGZHOU_ANXIAN else 0,
+        )
         
         self.tcs_status_cb = QCheckBox(labels[3][0])
         self.tcs_status_cb.setEnabled(labels[3][1])
-        layout.addWidget(self.tcs_status_cb, 1, 1)
+        layout.addWidget(
+            self.tcs_status_cb,
+            0 if protocol == PROTOCOL_HANGZHOU_ANXIAN else 1,
+            3 if protocol == PROTOCOL_HANGZHOU_ANXIAN else 1,
+        )
         
         return widget
     
@@ -522,22 +549,46 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.hall_fault_cb, 0, 1)
         
         self.throttle_fault_cb = QCheckBox("转把故障 (D5)")
-        layout.addWidget(self.throttle_fault_cb, 1, 0)
+        layout.addWidget(
+            self.throttle_fault_cb,
+            0 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 1,
+            2 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 0,
+        )
         
         self.controller_fault_cb = QCheckBox("控制器故障 (D4)")
-        layout.addWidget(self.controller_fault_cb, 1, 1)
+        layout.addWidget(
+            self.controller_fault_cb,
+            0 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 1,
+            3 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 1,
+        )
         
         self.under_voltage_cb = QCheckBox("欠压保护 (D3)")
-        layout.addWidget(self.under_voltage_cb, 2, 0)
+        layout.addWidget(
+            self.under_voltage_cb,
+            1 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 2,
+            0,
+        )
         
         self.cruise_cb = QCheckBox("巡航 (D2)")
-        layout.addWidget(self.cruise_cb, 2, 1)
+        layout.addWidget(
+            self.cruise_cb,
+            1 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 2,
+            1,
+        )
         
         self.assist_cb = QCheckBox("助力 (D1)")
-        layout.addWidget(self.assist_cb, 3, 0)
+        layout.addWidget(
+            self.assist_cb,
+            1 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 3,
+            2 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 0,
+        )
         
         self.motor_phase_loss_cb = QCheckBox("电机缺相 (D0)")
-        layout.addWidget(self.motor_phase_loss_cb, 3, 1)
+        layout.addWidget(
+            self.motor_phase_loss_cb,
+            1 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 3,
+            3 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 1,
+        )
         
         return widget
     
@@ -545,7 +596,12 @@ class MainWindow(QMainWindow):
         """创建瑞轮协议Status3配置标签页"""
         widget = QWidget()
         layout = QGridLayout(widget)
-        
+        if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN:
+            layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+            layout.setContentsMargins(8, 8, 8, 8)
+            layout.setHorizontalSpacing(18)
+            layout.setVerticalSpacing(6)
+
         d7_text = (
             "速度模式高位 (D7)"
             if self.current_protocol in {PROTOCOL_YADEA, PROTOCOL_DONGWEI_GTXH}
@@ -563,7 +619,13 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.gear_four_cb, 0, 0)
         
         self.motor_running_cb = QCheckBox("电机运行状态 (D6) - 1=运行/0=停止")
-        layout.addWidget(self.motor_running_cb, 0, 1)
+        layout.addWidget(
+            self.motor_running_cb,
+            0,
+            1,
+            1,
+            3 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 1,
+        )
         
         self.brake_cb = QCheckBox("刹车 (D5)")
         layout.addWidget(self.brake_cb, 1, 0)
@@ -572,17 +634,35 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.controller_protect_cb, 1, 1)
         
         self.regen_charging_cb = QCheckBox("滑行充电 (D3) - 1=能量回收")
-        layout.addWidget(self.regen_charging_cb, 2, 0)
+        layout.addWidget(
+            self.regen_charging_cb,
+            1 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 2,
+            2 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 0,
+            1,
+            2 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 1,
+        )
         
         self.anti_runaway_cb = QCheckBox("防飞车保护 (D2)")
-        layout.addWidget(self.anti_runaway_cb, 2, 1)
+        layout.addWidget(
+            self.anti_runaway_cb,
+            2 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 2,
+            0 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 1,
+        )
         
-        layout.addWidget(QLabel(speed_mode_label), 3, 0)
+        layout.addWidget(
+            QLabel(speed_mode_label),
+            2 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 3,
+            1 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 0,
+        )
         self.speed_mode_spin = QSpinBox()
         self.speed_mode_spin.setRange(
             0, 7 if self.current_protocol in {PROTOCOL_YADEA, PROTOCOL_DONGWEI_GTXH} else 3
         )
-        layout.addWidget(self.speed_mode_spin, 3, 1)
+        layout.addWidget(
+            self.speed_mode_spin,
+            2 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 3,
+            2 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 1,
+        )
         
         return widget
     
@@ -590,7 +670,12 @@ class MainWindow(QMainWindow):
         """创建瑞轮协议Status4配置标签页"""
         widget = QWidget()
         layout = QGridLayout(widget)
-        
+        if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN:
+            layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+            layout.setContentsMargins(8, 8, 8, 8)
+            layout.setHorizontalSpacing(18)
+            layout.setVerticalSpacing(6)
+
         if self.current_protocol == PROTOCOL_WUXI_YIGE:
             d7_text = "云动力模式(速度提升) (D7)"
             d7_enabled = True
@@ -610,22 +695,46 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.one_key_enable_cb, 0, 1)
         
         self.ekk_enable_cb = QCheckBox("EKK启用 (D5)")
-        layout.addWidget(self.ekk_enable_cb, 1, 0)
+        layout.addWidget(
+            self.ekk_enable_cb,
+            0 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 1,
+            2 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 0,
+        )
         
         self.over_current_cb = QCheckBox("过流保护 (D4)")
-        layout.addWidget(self.over_current_cb, 1, 1)
+        layout.addWidget(
+            self.over_current_cb,
+            0 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 1,
+            3 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 1,
+        )
         
         self.stall_protect_cb = QCheckBox("堵转保护 (D3)")
-        layout.addWidget(self.stall_protect_cb, 2, 0)
+        layout.addWidget(
+            self.stall_protect_cb,
+            1 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 2,
+            0,
+        )
         
         self.reverse_cb = QCheckBox("倒车 (D2)")
-        layout.addWidget(self.reverse_cb, 2, 1)
+        layout.addWidget(
+            self.reverse_cb,
+            1 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 2,
+            1,
+        )
         
         self.electronic_brake_cb = QCheckBox("电子刹车 (D1)")
-        layout.addWidget(self.electronic_brake_cb, 3, 0)
+        layout.addWidget(
+            self.electronic_brake_cb,
+            1 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 3,
+            2 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 0,
+        )
         
         self.speed_limit_cb = QCheckBox("限速 (D0) - 1=限速/0=解除")
-        layout.addWidget(self.speed_limit_cb, 3, 1)
+        layout.addWidget(
+            self.speed_limit_cb,
+            1 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 3,
+            3 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 1,
+        )
         
         return widget
     
@@ -2017,6 +2126,7 @@ class MainWindow(QMainWindow):
         self.status_tabs.addTab(status5_9_tab, "Status5-9")
         
         # 重新连接信号
+        self._compact_status_tab_pages()
         self.connect_status_signals()
     
     @pyqtSlot()

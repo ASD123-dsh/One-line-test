@@ -69,6 +69,49 @@ class SerialManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.send_interval_ms, 1000)
         mock_start.assert_called_once_with(1000)
 
+    def test_start_cyclic_send_sequence_accepts_multiple_frames(self):
+        frame_sequence = [
+            [0x3A, 0xC0, 0x50, 0x7E, 0x00, 0x1C, 0x1F, 0x02, 0x12, 0x17],
+            [0x3A, 0xC1, 0x51, 0x7F, 0x01, 0x1D, 0x20, 0x03, 0x13, 0x1A],
+        ]
+
+        with patch.object(self.manager.send_timer, "start") as mock_start:
+            success, error = self.manager.start_cyclic_send_sequence(frame_sequence, 1200)
+
+        self.assertTrue(success, error)
+        self.assertEqual(error, "")
+        self.assertEqual(self.manager.cyclic_frame_sequence, frame_sequence)
+        self.assertEqual(self.manager.cyclic_data, frame_sequence[0])
+        self.assertEqual(self.manager.cyclic_frame_index, 0)
+        mock_start.assert_called_once_with(1200)
+
+    def test_send_cyclic_data_rotates_packet_sequence(self):
+        frame_sequence = [
+            [0x3A, 0xC0, 0x50, 0x7E, 0x00, 0x1C, 0x1F, 0x02, 0x12, 0x17],
+            [0x3A, 0xC1, 0x51, 0x7F, 0x01, 0x1D, 0x20, 0x03, 0x13, 0x1A],
+        ]
+        self.manager.cyclic_frame_sequence = [frame.copy() for frame in frame_sequence]
+        self.manager.cyclic_send_mode = "uart"
+        self.manager.send_interval_ms = 1000
+
+        sent_frames = []
+
+        def fake_send(frame_data, skip_ui_update=False, send_mode="uart"):
+            sent_frames.append((frame_data.copy(), skip_ui_update, send_mode))
+            return True, ""
+
+        with patch.object(self.manager, "send_single_frame", side_effect=fake_send):
+            self.manager._send_cyclic_data()
+            self.manager._send_cyclic_data()
+            self.manager._send_cyclic_data()
+
+        self.assertEqual([item[0] for item in sent_frames], [
+            frame_sequence[0],
+            frame_sequence[1],
+            frame_sequence[0],
+        ])
+        self.assertTrue(all(item[2] == "uart" for item in sent_frames))
+
     def test_battery_single_wire_cyclic_send_requires_protocol_interval(self):
         frame_data = [0x00, 0x50, 0x00, 0x00, 0x00, 0x50]
 

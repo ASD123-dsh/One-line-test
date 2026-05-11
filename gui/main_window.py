@@ -38,6 +38,7 @@ from protocol.protocol_handler import (
 from gui.feedback_dialog import FeedbackDialog
 from serial_comm.serial_manager import SerialManager, SerialPortDetector
 from gui.frame_config_dialog import FrameConfigDialog
+from gui.packet_sequence_dialog import PacketSequenceDialog
 
 class MainWindow(QMainWindow):
     """主窗口"""
@@ -47,6 +48,9 @@ class MainWindow(QMainWindow):
         self.protocol_handler = ProtocolHandler()
         self.serial_manager = SerialManager()
         self.port_detector = SerialPortDetector()
+        self.packet_sequence_frames = {}
+        self.packet_sequence_dialog = None
+        self.active_send_mode = None
         
         # 当前状态
         self.current_status = StatusBits()
@@ -801,11 +805,20 @@ class MainWindow(QMainWindow):
         self.cyclic_send_btn.clicked.connect(self.toggle_cyclic_send)
         self.cyclic_send_btn.setEnabled(False)
         layout.addWidget(self.cyclic_send_btn, 1, 1)
+        self.packet_sequence_btn = QPushButton("包组配置")
+        self.packet_sequence_btn.clicked.connect(self.open_packet_sequence_config)
+        self.packet_sequence_btn.setEnabled(False)
+        layout.addWidget(self.packet_sequence_btn, 2, 0)
+
+        self.packet_sequence_send_btn = QPushButton("包组循环")
+        self.packet_sequence_send_btn.clicked.connect(self.toggle_packet_sequence_send)
+        self.packet_sequence_send_btn.setEnabled(False)
+        layout.addWidget(self.packet_sequence_send_btn, 2, 1)
         
         # 发送状态
         self.send_status = QLabel("就绪")
         self.send_status.setStyleSheet("color: blue; font-weight: bold;")
-        layout.addWidget(self.send_status, 2, 0, 1, 2)
+        layout.addWidget(self.send_status, 3, 0, 1, 2)
         
         return group
     
@@ -1015,6 +1028,10 @@ class MainWindow(QMainWindow):
         # 启用发送按钮
         self.single_send_btn.setEnabled(True)
         self.cyclic_send_btn.setEnabled(True)
+        self.packet_sequence_btn.setEnabled(True)
+        self.packet_sequence_send_btn.setEnabled(True)
+        self.packet_sequence_send_btn.setText("包组循环")
+        self.active_send_mode = None
         
         self.status_bar.showMessage(f"串口 {port_name} 连接成功")
     
@@ -1028,6 +1045,10 @@ class MainWindow(QMainWindow):
         # 禁用发送按钮
         self.single_send_btn.setEnabled(False)
         self.cyclic_send_btn.setEnabled(False)
+        self.packet_sequence_btn.setEnabled(False)
+        self.packet_sequence_send_btn.setEnabled(False)
+        self.packet_sequence_send_btn.setText("包组循环")
+        self.active_send_mode = None
         self.cyclic_send_btn.setText("循环发送")
         
         self.send_status.setText("就绪")
@@ -3007,8 +3028,16 @@ class MainWindow(QMainWindow):
     def toggle_cyclic_send(self):
         """切换循环发送状态"""
         if self.serial_manager.is_cyclic_sending():
+            if self.active_send_mode == "single":
+                self.serial_manager.stop_cyclic_send()
+                self._reset_send_action_buttons()
+                self.send_status.setText("就绪")
+                self.send_status.setStyleSheet("color: blue; font-weight: bold;")
+                return
             # 停止循环发送
             self.serial_manager.stop_cyclic_send()
+            self.active_send_mode = None
+            self.packet_sequence_send_btn.setText("包组循环")
             self.cyclic_send_btn.setText("循环发送")
             self.send_status.setText("就绪")
             self.send_status.setStyleSheet("color: blue; font-weight: bold;")
@@ -3043,12 +3072,85 @@ class MainWindow(QMainWindow):
             )
             
             if success:
+                self.active_send_mode = "single"
+                self.packet_sequence_send_btn.setText("包组循环")
                 self.cyclic_send_btn.setText("停止发送")
                 self.send_status.setText("循环发送中...")
                 self.send_status.setStyleSheet("color: orange; font-weight: bold;")
             else:
                 QMessageBox.critical(self, "发送失败", error_msg)
     
+    def _reset_send_action_buttons(self):
+        connected = self.serial_manager.is_connected
+        self.single_send_btn.setEnabled(connected)
+        self.cyclic_send_btn.setEnabled(connected)
+        self.packet_sequence_btn.setEnabled(connected)
+        self.packet_sequence_send_btn.setEnabled(connected)
+        self.cyclic_send_btn.setText("循环发送")
+        self.packet_sequence_send_btn.setText("包组循环")
+        self.active_send_mode = None
+
+    def _get_packet_sequence_frames(self):
+        frames = self.packet_sequence_frames.get(self.current_protocol)
+        if frames:
+            return [frame.copy() for frame in frames]
+
+        default_frame = self._make_default_custom_frame()
+        return [default_frame]
+
+    @pyqtSlot()
+    def open_packet_sequence_config(self):
+        frame_length = self.protocol_handler.get_protocol_frame_length(self.current_protocol)
+        current_frames = self.packet_sequence_frames.get(self.current_protocol)
+        if not current_frames:
+            current_frames = [self._make_default_custom_frame()]
+        elif any(len(frame) != frame_length for frame in current_frames):
+            current_frames = [self._make_default_custom_frame()]
+
+        byte_descriptions = self.protocol_handler.get_byte_descriptions(self.current_protocol)
+        dialog = PacketSequenceDialog(
+            self,
+            initial_frames=current_frames,
+            byte_descriptions=byte_descriptions,
+            dialog_title=f"{self.current_protocol} 包组配置",
+            checksum_mode=self.protocol_handler.get_protocol_checksum_mode(self.current_protocol),
+            default_frame_provider=self._make_default_custom_frame,
+        )
+        self.packet_sequence_dialog = dialog
+        if dialog.exec_() == QDialog.Accepted:
+            self.packet_sequence_frames[self.current_protocol] = dialog.get_frames()
+
+    @pyqtSlot()
+    def toggle_packet_sequence_send(self):
+        if self.serial_manager.is_cyclic_sending():
+            if self.active_send_mode == "sequence":
+                self.serial_manager.stop_cyclic_send()
+                self._reset_send_action_buttons()
+                self.send_status.setText("就绪")
+                self.send_status.setStyleSheet("color: blue; font-weight: bold;")
+                return
+            self.serial_manager.stop_cyclic_send()
+            self._reset_send_action_buttons()
+
+        frame_sequence = self._get_packet_sequence_frames()
+        if not frame_sequence:
+            QMessageBox.warning(self, "数据错误", "请先配置包组数据")
+            return
+
+        interval_ms = self.interval_spin.value()
+        send_mode = self.protocol_handler.get_protocol_send_mode(self.current_protocol)
+        success, error_msg = self.serial_manager.start_cyclic_send_sequence(
+            frame_sequence, interval_ms, send_mode=send_mode
+        )
+        if success:
+            self.active_send_mode = "sequence"
+            self.cyclic_send_btn.setText("循环发送")
+            self.packet_sequence_send_btn.setText("停止包组")
+            self.send_status.setText("包组循环发送中...")
+            self.send_status.setStyleSheet("color: orange; font-weight: bold;")
+        else:
+            QMessageBox.critical(self, "发送失败", error_msg)
+
     @pyqtSlot(list, str)
     def on_data_sent(self, frame_data, timestamp):
         """数据发送成功"""
@@ -3080,6 +3182,8 @@ class MainWindow(QMainWindow):
         # 停止循环发送
         if self.serial_manager.is_cyclic_sending():
             self.serial_manager.stop_cyclic_send()
+            self.active_send_mode = None
+            self.packet_sequence_send_btn.setText("包组循环")
             self.cyclic_send_btn.setText("循环发送")
             self.send_status.setText("发送失败")
             self.send_status.setStyleSheet("color: red; font-weight: bold;")

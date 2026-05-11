@@ -2,6 +2,9 @@
 # -*- coding: utf-8 -*-
 """Packet sequence editor for cyclic multi-frame sending."""
 
+import json
+import os
+from datetime import datetime
 from typing import Callable, List, Optional
 
 from PyQt5.QtCore import Qt
@@ -11,6 +14,7 @@ from PyQt5.QtWidgets import (
     QDialogButtonBox,
     QHBoxLayout,
     QLabel,
+    QFileDialog,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
@@ -22,6 +26,83 @@ from PyQt5.QtWidgets import (
 )
 
 from gui.frame_config_dialog import FrameConfigDialog
+
+PACKET_SEQUENCE_FILE_MAGIC = "sifexe.packet_sequence"
+PACKET_SEQUENCE_FILE_VERSION = 1
+
+
+def _normalize_frame(frame, expected_length: Optional[int] = None) -> List[int]:
+    if not isinstance(frame, (list, tuple)):
+        raise ValueError("每一帧必须是整数列表")
+
+    normalized: List[int] = []
+    for value in frame:
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError("每一帧必须只包含 0-255 的整数")
+        if value < 0 or value > 255:
+            raise ValueError("每一帧必须只包含 0-255 的整数")
+        normalized.append(value)
+
+    if expected_length is not None and len(normalized) != expected_length:
+        raise ValueError(f"帧长度不匹配，期望 {expected_length} 字节")
+
+    return normalized
+
+
+def build_packet_sequence_payload(
+    frames,
+    frame_length: int,
+    dialog_title: str = "",
+    checksum_mode: str = "xor",
+    byte_descriptions: Optional[List[str]] = None,
+):
+    normalized_frames = [
+        _normalize_frame(frame, expected_length=frame_length)
+        for frame in (frames or [])
+    ]
+    if not normalized_frames:
+        raise ValueError("至少需要一组数据包")
+
+    return {
+        "format": PACKET_SEQUENCE_FILE_MAGIC,
+        "version": PACKET_SEQUENCE_FILE_VERSION,
+        "dialog_title": dialog_title,
+        "checksum_mode": checksum_mode,
+        "frame_length": frame_length,
+        "byte_descriptions": byte_descriptions or [],
+        "frame_count": len(normalized_frames),
+        "frames": normalized_frames,
+    }
+
+
+def load_packet_sequence_payload(payload, expected_frame_length: int) -> List[List[int]]:
+    if isinstance(payload, dict):
+        file_format = payload.get("format")
+        if file_format not in (None, PACKET_SEQUENCE_FILE_MAGIC):
+            raise ValueError("不支持的包组文件格式")
+
+        file_length = payload.get("frame_length")
+        if file_length is not None and file_length != expected_frame_length:
+            raise ValueError(
+                f"文件帧长度为 {file_length} 字节，当前协议需要 {expected_frame_length} 字节"
+            )
+
+        frames = payload.get("frames")
+        if frames is None:
+            raise ValueError("文件中缺少 frames 字段")
+    elif isinstance(payload, list):
+        frames = payload
+    else:
+        raise ValueError("包组文件内容格式错误")
+
+    normalized_frames = [
+        _normalize_frame(frame, expected_length=expected_frame_length)
+        for frame in frames
+    ]
+    if not normalized_frames:
+        raise ValueError("包组文件中没有可用数据包")
+
+    return normalized_frames
 
 
 class PacketSequenceDialog(QDialog):
@@ -87,6 +168,16 @@ class PacketSequenceDialog(QDialog):
         self.copy_btn.clicked.connect(self.copy_selected_frame)
         action_row.addWidget(self.copy_btn)
         left_layout.addLayout(action_row)
+
+        file_row = QHBoxLayout()
+        self.export_btn = QPushButton("导出包组")
+        self.export_btn.clicked.connect(self.export_frames_to_file)
+        file_row.addWidget(self.export_btn)
+
+        self.import_btn = QPushButton("导入包组")
+        self.import_btn.clicked.connect(self.import_frames_from_file)
+        file_row.addWidget(self.import_btn)
+        left_layout.addLayout(file_row)
 
         move_row = QHBoxLayout()
         self.up_btn = QPushButton("上移")
@@ -250,6 +341,76 @@ class PacketSequenceDialog(QDialog):
         del self.frames[row]
         self.refresh_list()
         self.frame_list.setCurrentRow(min(row, len(self.frames) - 1))
+
+    def _default_export_filename(self) -> str:
+        safe_title = "".join(
+            ch if ch.isalnum() or ch in ("-", "_") else "_"
+            for ch in self.dialog_title
+        ).strip("_")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        return f"{safe_title or 'packet_sequence'}_{timestamp}.json"
+
+    def export_frames_to_file(self):
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "导出包组文件",
+            self._default_export_filename(),
+            "包组文件 (*.json);;所有文件 (*)",
+        )
+        if not path:
+            return
+
+        if not os.path.splitext(path)[1]:
+            path += ".json"
+
+        try:
+            payload = build_packet_sequence_payload(
+                self.frames,
+                frame_length=self.frame_length,
+                dialog_title=self.dialog_title,
+                checksum_mode=self.checksum_mode,
+                byte_descriptions=self.byte_descriptions,
+            )
+            with open(path, "w", encoding="utf-8") as file_obj:
+                json.dump(payload, file_obj, ensure_ascii=False, indent=2)
+        except (OSError, ValueError) as exc:
+            QMessageBox.critical(self, "导出失败", f"包组导出失败：{exc}")
+            return
+
+        QMessageBox.information(self, "导出成功", f"已导出到：{path}")
+
+    def import_frames_from_file(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "导入包组文件",
+            "",
+            "包组文件 (*.json);;所有文件 (*)",
+        )
+        if not path:
+            return
+
+        try:
+            with open(path, "r", encoding="utf-8") as file_obj:
+                payload = json.load(file_obj)
+            imported_frames = load_packet_sequence_payload(payload, self.frame_length)
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            QMessageBox.critical(self, "导入失败", f"包组导入失败：{exc}")
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "确认导入",
+            f"将使用文件中的 {len(imported_frames)} 组数据包替换当前包组，是否继续？",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        self.frames = [frame.copy() for frame in imported_frames]
+        self.refresh_list()
+        self.frame_list.setCurrentRow(0)
+        QMessageBox.information(self, "导入成功", f"已从文件导入 {len(self.frames)} 组数据包")
 
     def _on_accept(self):
         if not self.frames:

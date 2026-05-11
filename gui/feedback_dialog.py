@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-反馈二维码弹窗
-"""
+"""Show contact QR code with optional license info."""
 
 import os
 import sys
@@ -13,7 +11,6 @@ from PyQt5.QtWidgets import QDialog, QFrame, QLabel, QVBoxLayout
 
 
 def resource_path(*parts) -> str:
-    """兼容源码运行和 PyInstaller 打包后的资源路径。"""
     if hasattr(sys, "_MEIPASS"):
         base_dir = sys._MEIPASS
     else:
@@ -22,14 +19,24 @@ def resource_path(*parts) -> str:
 
 
 class FeedbackDialog(QDialog):
-    """显示联系二维码的反馈弹窗。"""
-
-    def __init__(self, parent=None):
+    def __init__(
+        self,
+        parent=None,
+        remaining_validity_text: str = "未激活",
+        footer_text: str | None = None,
+    ):
         super().__init__(parent)
+        self.remaining_validity_text = remaining_validity_text or "未激活"
+        self.footer_text = footer_text
         self.setWindowTitle("扫码反馈")
         self.setFixedSize(440, 520)
         self.setModal(True)
         self._init_ui()
+
+    def _build_footer_text(self) -> str:
+        if self.footer_text:
+            return self.footer_text
+        return f"请扫描二维码联系作者反馈问题    剩余有效时长：{self.remaining_validity_text}"
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
@@ -63,10 +70,10 @@ class FeedbackDialog(QDialog):
                 )
             )
 
-        tip_label = QLabel("请扫描二维码联系作者反馈问题")
+        tip_label = QLabel(self._build_footer_text())
         tip_label.setObjectName("tipLabel")
         tip_label.setAlignment(Qt.AlignCenter)
-        tip_label.setWordWrap(True)
+        tip_label.setWordWrap(False)
 
         qr_layout.addWidget(qr_label)
         layout.addWidget(qr_frame, 1)

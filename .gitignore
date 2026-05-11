@@ -86,6 +86,10 @@ Desktop.ini
 # Logs
 *.log
 
+# Local activation private key
+keys/
+tools/activation_code.txt
+
 # Documentation
 PDF/
 

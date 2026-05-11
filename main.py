@@ -10,10 +10,20 @@
 
 import sys
 import os
-from PyQt5.QtWidgets import QApplication, QMainWindow
+from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIcon, QFont
+from gui.activation_dialog import ActivationDialog
 from gui.main_window import MainWindow
+from licensing.activation import ActivationService
+
+
+def resource_path(*parts) -> str:
+    if hasattr(sys, "_MEIPASS"):
+        base_dir = sys._MEIPASS
+    else:
+        base_dir = os.path.abspath(os.path.dirname(__file__))
+    return os.path.join(base_dir, *parts)
 
 def main():
     """主程序入口"""
@@ -28,9 +38,19 @@ def main():
     # 设置全局字体
     font = QFont("Microsoft YaHei", 9)
     app.setFont(font)
-    
+    app_icon = QIcon(resource_path("img", "图标.ico"))
+    app.setWindowIcon(app_icon)
+
+    activation_service = ActivationService()
+    if not activation_service.is_activated():
+        activation_dialog = ActivationDialog(activation_service)
+        activation_dialog.setWindowIcon(app_icon)
+        if activation_dialog.exec_() != ActivationDialog.Accepted:
+            return
+
     # 创建主窗口
-    main_window = MainWindow()
+    main_window = MainWindow(activation_service=activation_service)
+    main_window.setWindowIcon(app_icon)
     main_window.show()
     
     # 运行应用程序

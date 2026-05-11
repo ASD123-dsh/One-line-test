@@ -39,12 +39,14 @@ from gui.feedback_dialog import FeedbackDialog
 from serial_comm.serial_manager import SerialManager, SerialPortDetector
 from gui.frame_config_dialog import FrameConfigDialog
 from gui.packet_sequence_dialog import PacketSequenceDialog
+from licensing.activation import ActivationService
 
 class MainWindow(QMainWindow):
     """主窗口"""
     
-    def __init__(self):
+    def __init__(self, activation_service: ActivationService | None = None):
         super().__init__()
+        self.activation_service = activation_service
         self.protocol_handler = ProtocolHandler()
         self.serial_manager = SerialManager()
         self.port_detector = SerialPortDetector()
@@ -206,7 +208,10 @@ class MainWindow(QMainWindow):
 
     def show_feedback_dialog(self):
         """显示作者联系二维码。"""
-        dialog = FeedbackDialog(self)
+        remaining_validity_text = "未激活"
+        if self.activation_service is not None:
+            remaining_validity_text = self.activation_service.get_remaining_validity_text()
+        dialog = FeedbackDialog(self, remaining_validity_text=remaining_validity_text)
         dialog.exec_()
 
     def create_control_panel(self) -> QWidget:

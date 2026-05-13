@@ -4,6 +4,7 @@ from protocol.protocol_handler import (
     PROTOCOL_BATTERY_SINGLE_WIRE,
     PROTOCOL_CHANGZHOU_XINSIWEI,
     PROTOCOL_DONGWEI_GTXH,
+    PROTOCOL_FZ_SIF,
     PROTOCOL_HANGZHOU_ANXIAN,
     PROTOCOL_LITHIUM_BMS,
     PROTOCOL_RUILUN,
@@ -54,6 +55,43 @@ class ProtocolHandlerTests(unittest.TestCase):
         self.assertTrue(success, error)
         self.assertEqual(frame, [8, 1, 6, 160, 96, 96, 5, 96, 144, 186, 100, 132])
         self.assertEqual(self.handler.get_current_hangzhou_sequence(), 2)
+
+    def test_fz_sif_frame_matches_bl1832_y62_mapping(self):
+        status = StatusBits(protocol_name=PROTOCOL_FZ_SIF)
+        status.side_stand = True
+        status.protocol_speed_limit = True
+        status.p_gear_protect = True
+        status.walk_mode = True
+        status.hall_fault = True
+        status.under_voltage = True
+        status.motor_running = True
+        status.regen_charging = True
+        status.speed_mode = 2
+        status.cloud_power_mode = True
+        status.one_key_enable = True
+        status.over_current = True
+        status.speed_limit = True
+        status.current_a = -2
+        status.hall_count = 0x1234
+        status.voltage_percentage = 75
+        status.voltage_48v = False
+        status.voltage_84v = True
+
+        success, frame, error = self.handler.generate_frame_for_preview(status)
+
+        self.assertTrue(success, error)
+        self.assertEqual(frame, [8, 97, 14, 200, 74, 209, 254, 18, 52, 75, 32, 135])
+
+    def test_fz_sif_rejects_unsupported_voltage_bits(self):
+        status = StatusBits(protocol_name=PROTOCOL_FZ_SIF)
+        status.voltage_48v = False
+        status.voltage_80v = True
+
+        success, frame, error = self.handler.generate_frame_for_preview(status)
+
+        self.assertFalse(success)
+        self.assertEqual(frame, [])
+        self.assertIn("FZ-sif协议", error)
 
     def test_xinri_frame_uses_unsigned_point_two_amp_encoding(self):
         status = StatusBits(protocol_name=PROTOCOL_XINRI)
@@ -204,6 +242,7 @@ class ProtocolHandlerTests(unittest.TestCase):
     def test_supported_protocols_have_byte_descriptions(self):
         for protocol_name in (
             PROTOCOL_RUILUN,
+            PROTOCOL_FZ_SIF,
             PROTOCOL_XINRI,
             PROTOCOL_HANGZHOU_ANXIAN,
             PROTOCOL_CHANGZHOU_XINSIWEI,

@@ -24,6 +24,7 @@ from protocol.protocol_handler import (
     PROTOCOL_BATTERY_SINGLE_WIRE,
     PROTOCOL_CHANGZHOU_XINSIWEI,
     PROTOCOL_DONGWEI_GTXH,
+    PROTOCOL_FZ_SIF,
     PROTOCOL_HANGZHOU_ANXIAN,
     PROTOCOL_LITHIUM_BMS,
     PROTOCOL_RUILUN,
@@ -366,6 +367,7 @@ class MainWindow(QMainWindow):
         self.protocol_combo.addItems(
             [
                 PROTOCOL_RUILUN,
+                PROTOCOL_FZ_SIF,
                 PROTOCOL_XINRI,
                 PROTOCOL_HANGZHOU_ANXIAN,
                 PROTOCOL_CHANGZHOU_XINSIWEI,
@@ -491,6 +493,13 @@ class MainWindow(QMainWindow):
                 ("P驻车 (D3)", True),
                 ("电压状态位 D0 (由下方电压状态控制)", False),
             ]
+        elif protocol == PROTOCOL_FZ_SIF:
+            labels = [
+                ("侧撑指示 (D3)", True),
+                ("限速中 (D2)", True),
+                ("驻车指示(P档) (D1)", True),
+                ("备用 (D0)", False),
+            ]
         elif protocol == PROTOCOL_WUXI_YIGE:
             labels = [
                 ("侧撑指示 (D3)", True),
@@ -544,8 +553,8 @@ class MainWindow(QMainWindow):
         widget = QWidget()
         layout = QGridLayout(widget)
         
-        status2_d7_text = "6KM推行/推车标志 (D7)" if self.current_protocol == PROTOCOL_WUXI_YIGE else "备用 (D7)"
-        status2_d7_enabled = self.current_protocol == PROTOCOL_WUXI_YIGE
+        status2_d7_enabled = self.current_protocol in {PROTOCOL_WUXI_YIGE, PROTOCOL_FZ_SIF}
+        status2_d7_text = "6KM推行/推车标志 (D7)" if status2_d7_enabled else "备用 (D7)"
         self.status2_d7_cb = QCheckBox(status2_d7_text)
         self.status2_d7_cb.setEnabled(status2_d7_enabled)
         layout.addWidget(self.status2_d7_cb, 0, 0)
@@ -681,7 +690,7 @@ class MainWindow(QMainWindow):
             layout.setHorizontalSpacing(18)
             layout.setVerticalSpacing(6)
 
-        if self.current_protocol == PROTOCOL_WUXI_YIGE:
+        if self.current_protocol in {PROTOCOL_WUXI_YIGE, PROTOCOL_FZ_SIF}:
             d7_text = "云动力模式(速度提升) (D7)"
             d7_enabled = True
         elif self.current_protocol in {PROTOCOL_RUILUN, PROTOCOL_DONGWEI_GTXH}:
@@ -796,6 +805,8 @@ class MainWindow(QMainWindow):
         
         if protocol == PROTOCOL_HANGZHOU_ANXIAN:
             status8_text = "电压百分比 (Status8):"
+        elif protocol == PROTOCOL_FZ_SIF:
+            status8_text = "电池电量/电压比例值 (Status8):"
         elif protocol == PROTOCOL_YADEA:
             status8_text = "电量百分比 (Status8):"
         elif protocol == PROTOCOL_DONGWEI_GTXH:
@@ -840,11 +851,12 @@ class MainWindow(QMainWindow):
             return widget
 
         # Status9 - 系统电压
-        voltage_group_title = (
-            "电压状态 (DATA2 D2~D0，仅支持默认/48V/60V/72V/80V/96V)"
-            if protocol == PROTOCOL_DONGWEI_GTXH
-            else "系统电压 (仅选一个，可全不选)"
-        )
+        if protocol == PROTOCOL_DONGWEI_GTXH:
+            voltage_group_title = "电压状态 (DATA2 D2~D0，仅支持默认/48V/60V/72V/80V/96V)"
+        elif protocol == PROTOCOL_FZ_SIF:
+            voltage_group_title = "系统电压 (FZ-sif：48V/60V/64V/72V/84V/96V)"
+        else:
+            voltage_group_title = "系统电压 (仅选一个，可全不选)"
         voltage_group = QGroupBox(voltage_group_title)
         voltage_layout = QGridLayout(voltage_group)
         self.voltage_group = QButtonGroup()
@@ -892,6 +904,9 @@ class MainWindow(QMainWindow):
             self.voltage_36v_rb.setEnabled(False)
             self.voltage_64v_rb.setEnabled(False)
             self.voltage_84v_rb.setEnabled(False)
+        elif protocol == PROTOCOL_FZ_SIF:
+            self.voltage_36v_rb.setEnabled(False)
+            self.voltage_80v_rb.setEnabled(False)
 
         layout.addWidget(voltage_group, row_index, 0, 1, 2)
         
@@ -1185,6 +1200,8 @@ class MainWindow(QMainWindow):
         # 根据协议类型切换Status配置界面
         if protocol_name == PROTOCOL_RUILUN:
             self.switch_to_ruilun_protocol()
+        elif protocol_name == PROTOCOL_FZ_SIF:
+            self.switch_to_fz_sif_protocol()
         elif protocol_name == PROTOCOL_XINRI:
             self.switch_to_xinri_protocol()
         elif protocol_name == PROTOCOL_HANGZHOU_ANXIAN:
@@ -1216,6 +1233,13 @@ class MainWindow(QMainWindow):
         self.show_ruilun_status_config()
         
         # 重置为正常运行场景
+        self.normal_radio.setChecked(True)
+        self.on_scenario_changed()
+
+    def switch_to_fz_sif_protocol(self):
+        """切换到 FZ-sif 协议"""
+        self.current_status = PresetScenarios.fz_sif_normal_running()
+        self.show_ruilun_status_config()
         self.normal_radio.setChecked(True)
         self.on_scenario_changed()
     
@@ -2159,6 +2183,8 @@ class MainWindow(QMainWindow):
             # 根据当前协议加载预设场景
             if self.current_protocol == PROTOCOL_RUILUN:
                 self.load_ruilun_preset_scenario(scenario_id)
+            elif self.current_protocol == PROTOCOL_FZ_SIF:
+                self.load_fz_sif_preset_scenario(scenario_id)
             elif self.current_protocol == PROTOCOL_XINRI:
                 self.load_xinri_preset_scenario(scenario_id)
             elif self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN:
@@ -2192,6 +2218,19 @@ class MainWindow(QMainWindow):
             self.current_status = PresetScenarios.fault_scenario()
         
         # 更新UI显示
+        self.update_ruilun_ui_from_status()
+
+    def load_fz_sif_preset_scenario(self, scenario_id):
+        """加载 FZ-sif 协议预设场景"""
+        if scenario_id == 0:  # 正常运行
+            self.current_status = PresetScenarios.fz_sif_normal_running()
+        elif scenario_id == 1:  # 能量回收
+            self.current_status = PresetScenarios.fz_sif_energy_recovery()
+        elif scenario_id == 2:  # 故障场景
+            self.current_status = PresetScenarios.fz_sif_fault_scenario()
+        else:
+            self.current_status = StatusBits(protocol_name=PROTOCOL_FZ_SIF)
+
         self.update_ruilun_ui_from_status()
     
     def load_xinri_preset_scenario(self, scenario_id):
@@ -2418,6 +2457,11 @@ class MainWindow(QMainWindow):
             self.speed_alarm_cb.setChecked(getattr(status, "protocol_speed_limit", False))
             self.p_gear_protect_cb.setChecked(getattr(status, "p_gear_protect", False))
             self.tcs_status_cb.setChecked(False)
+        elif self.current_protocol == PROTOCOL_FZ_SIF:
+            self.distance_mode_cb.setChecked(getattr(status, "side_stand", False))
+            self.speed_alarm_cb.setChecked(getattr(status, "protocol_speed_limit", False))
+            self.p_gear_protect_cb.setChecked(getattr(status, "p_gear_protect", False))
+            self.tcs_status_cb.setChecked(False)
         elif self.current_protocol == PROTOCOL_DONGWEI_GTXH:
             self.distance_mode_cb.setChecked(False)
             self.speed_alarm_cb.setChecked(False)
@@ -2456,7 +2500,7 @@ class MainWindow(QMainWindow):
         self.anti_runaway_cb.setChecked(getattr(status, "anti_runaway", False))
         self.speed_mode_spin.setValue(getattr(status, "speed_mode", 0))
 
-        if self.current_protocol == PROTOCOL_WUXI_YIGE:
+        if self.current_protocol in {PROTOCOL_WUXI_YIGE, PROTOCOL_FZ_SIF}:
             self.current_70_flag_cb.setChecked(getattr(status, "cloud_power_mode", False))
         else:
             self.current_70_flag_cb.setChecked(getattr(status, "current_70_flag", False))
@@ -2474,7 +2518,7 @@ class MainWindow(QMainWindow):
         self.current_spin.setValue(getattr(status, "current_a", 0))
         self.hall_count_spin.setValue(getattr(status, "hall_count", 0))
         self.speed_spin.setValue(getattr(status, "speed_kmh", 0.0))
-        if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN:
+        if self.current_protocol in {PROTOCOL_HANGZHOU_ANXIAN, PROTOCOL_FZ_SIF}:
             self.soc_spin.setValue(getattr(status, "voltage_percentage", 0))
         else:
             self.soc_spin.setValue(getattr(status, "soc_percent", 0))
@@ -2731,6 +2775,10 @@ class MainWindow(QMainWindow):
         if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN:
             status.protocol_speed_limit = self.speed_alarm_cb.isChecked()
             status.p_gear_protect = self.p_gear_protect_cb.isChecked()
+        elif self.current_protocol == PROTOCOL_FZ_SIF:
+            status.side_stand = self.distance_mode_cb.isChecked()
+            status.protocol_speed_limit = self.speed_alarm_cb.isChecked()
+            status.p_gear_protect = self.p_gear_protect_cb.isChecked()
         elif self.current_protocol == PROTOCOL_DONGWEI_GTXH:
             status.p_gear_protect = self.p_gear_protect_cb.isChecked()
         elif self.current_protocol in {PROTOCOL_WUXI_YIGE, PROTOCOL_YADEA}:
@@ -2762,7 +2810,7 @@ class MainWindow(QMainWindow):
         status.speed_mode = self.speed_mode_spin.value()
         
         # Status4
-        if self.current_protocol == PROTOCOL_WUXI_YIGE:
+        if self.current_protocol in {PROTOCOL_WUXI_YIGE, PROTOCOL_FZ_SIF}:
             status.cloud_power_mode = self.current_70_flag_cb.isChecked()
         else:
             status.current_70_flag = self.current_70_flag_cb.isChecked()
@@ -2781,7 +2829,7 @@ class MainWindow(QMainWindow):
         status.current_a = self.current_spin.value()
         status.hall_count = self.hall_count_spin.value()
         status.speed_kmh = self.speed_spin.value()
-        if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN:
+        if self.current_protocol in {PROTOCOL_HANGZHOU_ANXIAN, PROTOCOL_FZ_SIF}:
             status.voltage_percentage = self.soc_spin.value()
         else:
             status.soc_percent = self.soc_spin.value()

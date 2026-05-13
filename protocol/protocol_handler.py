@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Tuple
 
 PROTOCOL_RUILUN = "瑞轮协议"
+PROTOCOL_FZ_SIF = "FZ-sif协议"
 PROTOCOL_XINRI = "新日协议"
 PROTOCOL_HANGZHOU_ANXIAN = "杭州安显协议"
 PROTOCOL_CHANGZHOU_XINSIWEI = "常州新思维协议"
@@ -22,6 +23,7 @@ PROTOCOL_BATTERY_SINGLE_WIRE = "电池单线通讯协议"
 
 SUPPORTED_PROTOCOLS = [
     PROTOCOL_RUILUN,
+    PROTOCOL_FZ_SIF,
     PROTOCOL_XINRI,
     PROTOCOL_HANGZHOU_ANXIAN,
     PROTOCOL_CHANGZHOU_XINSIWEI,
@@ -286,6 +288,11 @@ class ProtocolHandler:
             if any(getattr(status, field_name, False) for field_name in unsupported_voltage_fields):
                 return False, "东威协议的电压状态仅支持默认/48V/60V/72V/80V/96V"
 
+        if protocol_name == PROTOCOL_FZ_SIF:
+            unsupported_voltage_fields = ("voltage_24v", "voltage_36v", "voltage_80v")
+            if any(getattr(status, field_name, False) for field_name in unsupported_voltage_fields):
+                return False, "FZ-sif协议的系统电压仅支持默认/48V/60V/64V/72V/84V/96V"
+
         if protocol_name == PROTOCOL_CHANGZHOU_XINSIWEI and not (
             0 <= status.xinsiwei_sequence <= 4095
         ):
@@ -383,6 +390,8 @@ class ProtocolHandler:
         protocol_name = self.resolve_protocol_name(status)
         if protocol_name == PROTOCOL_CHANGZHOU_XINSIWEI:
             return self.generate_xinsiwei_frame_with_auto_sequence(status)
+        if protocol_name == PROTOCOL_FZ_SIF:
+            return self._generate_fz_sif_frame(status)
         if protocol_name == PROTOCOL_HANGZHOU_ANXIAN:
             return self._generate_hangzhou_frame(status, preview=False)
         if protocol_name == PROTOCOL_XINRI:
@@ -407,6 +416,8 @@ class ProtocolHandler:
         protocol_name = self.resolve_protocol_name(status)
         if protocol_name == PROTOCOL_CHANGZHOU_XINSIWEI:
             return self.generate_xinsiwei_frame_for_preview(status)
+        if protocol_name == PROTOCOL_FZ_SIF:
+            return self._generate_fz_sif_frame(status)
         if protocol_name == PROTOCOL_HANGZHOU_ANXIAN:
             return self._generate_hangzhou_frame(status, preview=True)
         if protocol_name == PROTOCOL_XINRI:
@@ -443,6 +454,27 @@ class ProtocolHandler:
         frame[8] = hall_count & 0xFF
         frame[9] = self._encode_ruilun_soc(status)
         frame[10] = self._encode_voltage_mask(status)
+        frame[11] = self._xor_checksum(frame[:11])
+        return True, frame, ""
+
+    def _generate_fz_sif_frame(self, status: StatusBits) -> Tuple[bool, List[int], str]:
+        is_valid, error_msg = self.validate_status_bits(status)
+        if not is_valid:
+            return False, [], error_msg
+
+        hall_count = self._resolve_hall_count(status)
+        frame = [0] * 12
+        frame[0] = 0x08
+        frame[1] = 0x61
+        frame[2] = self._encode_fz_sif_status1(status)
+        frame[3] = self._encode_generic_status2(status, include_walk_mode=True)
+        frame[4] = self._encode_generic_status3(status, PROTOCOL_FZ_SIF)
+        frame[5] = self._encode_generic_status4(status, PROTOCOL_FZ_SIF)
+        frame[6] = self._encode_signed_current(status.current_a)
+        frame[7] = (hall_count >> 8) & 0xFF
+        frame[8] = hall_count & 0xFF
+        frame[9] = status.voltage_percentage & 0xFF
+        frame[10] = self._encode_fz_sif_voltage_mask(status)
         frame[11] = self._xor_checksum(frame[:11])
         return True, frame, ""
 
@@ -668,6 +700,16 @@ class ProtocolHandler:
             value |= 0x01
         return value
 
+    def _encode_fz_sif_status1(self, status: StatusBits) -> int:
+        value = 0
+        if status.side_stand:
+            value |= 0x08
+        if status.protocol_speed_limit:
+            value |= 0x04
+        if status.p_gear_protect:
+            value |= 0x02
+        return value
+
     def _encode_hangzhou_status1(self, status: StatusBits) -> int:
         value = 0
         if status.protocol_speed_limit:
@@ -776,7 +818,7 @@ class ProtocolHandler:
 
     def _encode_generic_status4(self, status: StatusBits, protocol_name: str) -> int:
         value = 0
-        if protocol_name == PROTOCOL_WUXI_YIGE:
+        if protocol_name in {PROTOCOL_WUXI_YIGE, PROTOCOL_FZ_SIF}:
             if status.cloud_power_mode:
                 value |= 0x80
         elif protocol_name in {PROTOCOL_RUILUN, PROTOCOL_DONGWEI_GTXH}:
@@ -820,6 +862,21 @@ class ProtocolHandler:
             if getattr(status, field_name, False):
                 mask |= bit_mask
         return mask & 0xFF
+
+    def _encode_fz_sif_voltage_mask(self, status: StatusBits) -> int:
+        if status.voltage_48v:
+            return 0x02
+        if status.voltage_60v:
+            return 0x04
+        if status.voltage_64v:
+            return 0x08
+        if status.voltage_72v:
+            return 0x10
+        if status.voltage_84v:
+            return 0x20
+        if status.voltage_96v:
+            return 0x40
+        return 0x00
 
     def _encode_signed_current(self, current_a: int) -> int:
         return current_a & 0xFF
@@ -940,6 +997,20 @@ class ProtocolHandler:
                 "Status7 霍尔计数低字节",
                 "Status8 锂电 SOC/仪表自算",
                 "Status9 协议切换电压",
+                "校验和 (XOR)",
+            ],
+            PROTOCOL_FZ_SIF: [
+                "设备编码 (固定 0x08)",
+                "流水号 (固定 0x61)",
+                "Status1 侧撑/限速中/驻车",
+                "Status2 推行/故障/巡航/助力",
+                "Status3 电机/刹车/保护/速度模式",
+                "Status4 云动力/一键通/EKK/保护",
+                "Status5 运行电流",
+                "Status6 速度霍尔计数高字节",
+                "Status7 速度霍尔计数低字节",
+                "Status8 电池电量/电压比例值",
+                "Status9 控制器额定工作电压",
                 "校验和 (XOR)",
             ],
             PROTOCOL_HANGZHOU_ANXIAN: [
@@ -1116,6 +1187,44 @@ class PresetScenarios:
         status.hall_fault = True
         status.throttle_fault = True
         status.controller_fault = True
+        status.electronic_brake = True
+        status.speed_limit = True
+        return status
+
+    @staticmethod
+    def fz_sif_normal_running() -> StatusBits:
+        status = StatusBits(protocol_name=PROTOCOL_FZ_SIF)
+        status.voltage_48v = True
+        status.hall_count = 3200
+        status.voltage_percentage = 80
+        status.motor_running = True
+        status.current_a = 12
+        return status
+
+    @staticmethod
+    def fz_sif_energy_recovery() -> StatusBits:
+        status = StatusBits(protocol_name=PROTOCOL_FZ_SIF)
+        status.voltage_60v = True
+        status.voltage_48v = False
+        status.hall_count = 2600
+        status.voltage_percentage = 60
+        status.regen_charging = True
+        status.current_a = -3
+        return status
+
+    @staticmethod
+    def fz_sif_fault_scenario() -> StatusBits:
+        status = StatusBits(protocol_name=PROTOCOL_FZ_SIF)
+        status.voltage_72v = True
+        status.voltage_48v = False
+        status.hall_count = 0
+        status.voltage_percentage = 15
+        status.side_stand = True
+        status.protocol_speed_limit = True
+        status.hall_fault = True
+        status.throttle_fault = True
+        status.controller_fault = True
+        status.under_voltage = True
         status.electronic_brake = True
         status.speed_limit = True
         return status

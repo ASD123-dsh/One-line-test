@@ -18,6 +18,7 @@ PROTOCOL_WUXI_YIGE = "无锡一格Y67协议"
 PROTOCOL_YADEA = "雅迪协议"
 PROTOCOL_DONGWEI_GTXH = "东威GTXH协议"
 PROTOCOL_XINCHI = "芯驰BMS协议"
+PROTOCOL_LUYUAN_BMS = "绿源BMS一线通协议"
 PROTOCOL_LITHIUM_BMS = "一线通--锂电池BMS"
 PROTOCOL_BATTERY_SINGLE_WIRE = "电池单线通讯协议"
 
@@ -31,6 +32,7 @@ SUPPORTED_PROTOCOLS = [
     PROTOCOL_YADEA,
     PROTOCOL_DONGWEI_GTXH,
     PROTOCOL_XINCHI,
+    PROTOCOL_LUYUAN_BMS,
     PROTOCOL_LITHIUM_BMS,
     PROTOCOL_BATTERY_SINGLE_WIRE,
 ]
@@ -151,6 +153,20 @@ class StatusBits:
     xinchi_total_voltage_v: float = 48.0
     xinchi_total_current_a: int = 0
 
+    # 绿源 BMS 一线通
+    luyuan_charge_mos: bool = False
+    luyuan_discharge_mos: bool = False
+    luyuan_predischarge_mos: bool = False
+    luyuan_charge_enable: bool = False
+    luyuan_charger_connected: bool = False
+    luyuan_cycle_count: int = 0
+    luyuan_temperature_c: int = 25
+    luyuan_max_cell_voltage_mv: int = 4200
+    luyuan_min_cell_voltage_mv: int = 4100
+    luyuan_current_a: float = -12.0
+    luyuan_total_voltage_v: int = 54
+    luyuan_soh_percent: int = 100
+
     # 一线通锂电池 BMS
     lithium_bms_alarm_enable: bool = False
     lithium_bms_high_temp_alarm: bool = False
@@ -190,6 +206,8 @@ class ProtocolHandler:
 
         if protocol_name == PROTOCOL_BATTERY_SINGLE_WIRE:
             return 6
+        if protocol_name == PROTOCOL_LUYUAN_BMS:
+            return 15
         if protocol_name == PROTOCOL_XINCHI:
             return 10
         return 12
@@ -197,13 +215,19 @@ class ProtocolHandler:
     def get_protocol_checksum_mode(self, protocol_name: str) -> str:
         """获取协议校验模式。"""
 
-        if protocol_name in {PROTOCOL_XINCHI, PROTOCOL_BATTERY_SINGLE_WIRE}:
+        if protocol_name in {
+            PROTOCOL_XINCHI,
+            PROTOCOL_LUYUAN_BMS,
+            PROTOCOL_BATTERY_SINGLE_WIRE,
+        }:
             return "sum"
         return "xor"
 
     def get_protocol_send_mode(self, protocol_name: str) -> str:
         """获取协议的串口发送模式。"""
 
+        if protocol_name == PROTOCOL_LUYUAN_BMS:
+            return "luyuan_bms_sif"
         if protocol_name == PROTOCOL_BATTERY_SINGLE_WIRE:
             return "battery_single_wire"
         return "uart"
@@ -313,6 +337,24 @@ class ProtocolHandler:
             if not (0 <= status.xinchi_total_current_a <= 255):
                 return False, "芯驰总电流必须在 0A 到 255A 范围内"
 
+        if protocol_name == PROTOCOL_LUYUAN_BMS:
+            if not (0 <= status.luyuan_cycle_count <= 65535):
+                return False, "绿源BMS循环次数必须在 0-65535 范围内"
+            if not (-40 <= status.luyuan_temperature_c <= 120):
+                return False, "绿源BMS电池温度必须在 -40℃ 到 120℃ 范围内"
+            if status.luyuan_max_cell_voltage_mv < status.luyuan_min_cell_voltage_mv:
+                return False, "绿源BMS最高电芯电压不能小于最低电芯电压"
+            if not (0 <= status.luyuan_max_cell_voltage_mv <= 65535):
+                return False, "绿源BMS最高电芯电压必须在 0-65535mV 范围内"
+            if not (0 <= status.luyuan_min_cell_voltage_mv <= 65535):
+                return False, "绿源BMS最低电芯电压必须在 0-65535mV 范围内"
+            if not self._is_luyuan_current_encodable(status.luyuan_current_a):
+                return False, "绿源BMS电流必须在 -327.67A 到 327.67A 范围内"
+            if not (0 <= status.luyuan_total_voltage_v <= 255):
+                return False, "绿源BMS总电压必须在 0V 到 255V 范围内"
+            if not (0 <= status.luyuan_soh_percent <= 100):
+                return False, "绿源BMS健康度必须在 0-100 范围内"
+
         if protocol_name == PROTOCOL_LITHIUM_BMS:
             if not (0 <= status.lithium_bms_cycle_count <= 65535):
                 return False, "锂电池BMS循环次数必须在 0-65535 范围内"
@@ -404,6 +446,8 @@ class ProtocolHandler:
             return self._generate_dongwei_gtxh_frame(status)
         if protocol_name == PROTOCOL_XINCHI:
             return self._generate_xinchi_frame(status)
+        if protocol_name == PROTOCOL_LUYUAN_BMS:
+            return self._generate_luyuan_bms_frame(status)
         if protocol_name == PROTOCOL_LITHIUM_BMS:
             return self._generate_lithium_bms_frame(status)
         if protocol_name == PROTOCOL_BATTERY_SINGLE_WIRE:
@@ -430,6 +474,8 @@ class ProtocolHandler:
             return self._generate_dongwei_gtxh_frame(status)
         if protocol_name == PROTOCOL_XINCHI:
             return self._generate_xinchi_frame(status)
+        if protocol_name == PROTOCOL_LUYUAN_BMS:
+            return self._generate_luyuan_bms_frame(status)
         if protocol_name == PROTOCOL_LITHIUM_BMS:
             return self._generate_lithium_bms_frame(status)
         if protocol_name == PROTOCOL_BATTERY_SINGLE_WIRE:
@@ -652,6 +698,31 @@ class ProtocolHandler:
         frame[9] = self._sum_checksum(frame[:9])
         return True, frame, ""
 
+    def _generate_luyuan_bms_frame(self, status: StatusBits) -> Tuple[bool, List[int], str]:
+        is_valid, error_msg = self.validate_status_bits(status)
+        if not is_valid:
+            return False, [], error_msg
+
+        current_raw = self._encode_luyuan_current(status.luyuan_current_a)
+
+        frame = [0] * 15
+        frame[0] = 0x3A
+        frame[1] = self._encode_luyuan_status0(status)
+        frame[2] = status.soc_percent & 0xFF
+        frame[3] = status.luyuan_cycle_count & 0xFF
+        frame[4] = (status.luyuan_cycle_count >> 8) & 0xFF
+        frame[5] = self._encode_sign_magnitude_byte(status.luyuan_temperature_c)
+        frame[6] = status.luyuan_max_cell_voltage_mv & 0xFF
+        frame[7] = (status.luyuan_max_cell_voltage_mv >> 8) & 0xFF
+        frame[8] = status.luyuan_min_cell_voltage_mv & 0xFF
+        frame[9] = (status.luyuan_min_cell_voltage_mv >> 8) & 0xFF
+        frame[10] = current_raw & 0xFF
+        frame[11] = (current_raw >> 8) & 0xFF
+        frame[12] = status.luyuan_total_voltage_v & 0xFF
+        frame[13] = status.luyuan_soh_percent & 0xFF
+        frame[14] = self._sum_checksum(frame[:14])
+        return True, frame, ""
+
     def _generate_lithium_bms_frame(self, status: StatusBits) -> Tuple[bool, List[int], str]:
         is_valid, error_msg = self.validate_status_bits(status)
         if not is_valid:
@@ -757,6 +828,20 @@ class ProtocolHandler:
             value |= 0x04
         if status.xinchi_bms_fault:
             value |= 0x01
+        return value
+
+    def _encode_luyuan_status0(self, status: StatusBits) -> int:
+        value = 0
+        if status.luyuan_charge_mos:
+            value |= 0x80
+        if status.luyuan_discharge_mos:
+            value |= 0x40
+        if status.luyuan_predischarge_mos:
+            value |= 0x20
+        if status.luyuan_charge_enable:
+            value |= 0x10
+        if status.luyuan_charger_connected:
+            value |= 0x08
         return value
 
     def _encode_lithium_bms_status1(self, status: StatusBits) -> int:
@@ -890,6 +975,16 @@ class ProtocolHandler:
         scaled_value = max(-128, min(127, scaled_value))
         return scaled_value & 0xFF
 
+    def _is_luyuan_current_encodable(self, current_a: float) -> bool:
+        magnitude = int(round(abs(current_a) * 100))
+        return magnitude <= 0x7FFF
+
+    def _encode_luyuan_current(self, current_a: float) -> int:
+        magnitude = min(0x7FFF, int(round(abs(current_a) * 100)))
+        if current_a < 0:
+            return 0x8000 | magnitude
+        return magnitude
+
     def _encode_dongwei_voltage_state(self, status: StatusBits) -> int:
         if status.voltage_48v:
             return 0x02
@@ -911,11 +1006,14 @@ class ProtocolHandler:
         raw_value = int(round(voltage_v * 100)) - 185
         return max(0, min(255, raw_value))
 
-    def _encode_lithium_bms_temperature(self, temp_c: int) -> int:
-        magnitude = min(127, abs(int(temp_c)))
-        if temp_c < 0:
+    def _encode_sign_magnitude_byte(self, value: int) -> int:
+        magnitude = min(127, abs(int(value)))
+        if value < 0:
             return 0x80 | magnitude
         return magnitude & 0x7F
+
+    def _encode_lithium_bms_temperature(self, temp_c: int) -> int:
+        return self._encode_sign_magnitude_byte(temp_c)
 
     def _encode_xinsiwei_status1(self, status: StatusBits) -> int:
         value = 0
@@ -1107,6 +1205,23 @@ class ProtocolHandler:
                 "Byte5 总电压低字节(0.1V)",
                 "Byte6 总电压高字节(0.1V)",
                 "Byte7 总电流(A)",
+                "CheckSum 累加和",
+            ],
+            PROTOCOL_LUYUAN_BMS: [
+                "ID (固定 0x3A)",
+                "Byte0 BMS当前状态",
+                "Byte1 SOC",
+                "Byte2 循环次数低字节",
+                "Byte3 循环次数高字节",
+                "Byte4 电池温度(原码有符号)",
+                "Byte5 最高电芯电压低字节(mV)",
+                "Byte6 最高电芯电压高字节(mV)",
+                "Byte7 最低电芯电压低字节(mV)",
+                "Byte8 最低电芯电压高字节(mV)",
+                "Byte9 电流低字节(0.01A/bit)",
+                "Byte10 电流高字节(符号位)",
+                "Byte11 总电压(V)",
+                "Byte12 健康度 SOH",
                 "CheckSum 累加和",
             ],
             PROTOCOL_LITHIUM_BMS: [
@@ -1476,6 +1591,60 @@ class PresetScenarios:
         status.xinchi_temperature_c = 75
         status.xinchi_total_voltage_v = 42.0
         status.xinchi_total_current_a = 0
+        return status
+
+    @staticmethod
+    def luyuan_bms_normal_running() -> StatusBits:
+        status = StatusBits(protocol_name=PROTOCOL_LUYUAN_BMS)
+        status.luyuan_charge_mos = False
+        status.luyuan_discharge_mos = True
+        status.luyuan_predischarge_mos = False
+        status.luyuan_charge_enable = True
+        status.luyuan_charger_connected = False
+        status.soc_percent = 82
+        status.luyuan_cycle_count = 126
+        status.luyuan_temperature_c = 28
+        status.luyuan_max_cell_voltage_mv = 4205
+        status.luyuan_min_cell_voltage_mv = 4178
+        status.luyuan_current_a = -18.25
+        status.luyuan_total_voltage_v = 54
+        status.luyuan_soh_percent = 98
+        return status
+
+    @staticmethod
+    def luyuan_bms_energy_recovery() -> StatusBits:
+        status = StatusBits(protocol_name=PROTOCOL_LUYUAN_BMS)
+        status.luyuan_charge_mos = True
+        status.luyuan_discharge_mos = False
+        status.luyuan_predischarge_mos = False
+        status.luyuan_charge_enable = True
+        status.luyuan_charger_connected = True
+        status.soc_percent = 64
+        status.luyuan_cycle_count = 144
+        status.luyuan_temperature_c = 31
+        status.luyuan_max_cell_voltage_mv = 4156
+        status.luyuan_min_cell_voltage_mv = 4128
+        status.luyuan_current_a = 6.5
+        status.luyuan_total_voltage_v = 55
+        status.luyuan_soh_percent = 96
+        return status
+
+    @staticmethod
+    def luyuan_bms_fault_scenario() -> StatusBits:
+        status = StatusBits(protocol_name=PROTOCOL_LUYUAN_BMS)
+        status.luyuan_charge_mos = False
+        status.luyuan_discharge_mos = False
+        status.luyuan_predischarge_mos = True
+        status.luyuan_charge_enable = False
+        status.luyuan_charger_connected = True
+        status.soc_percent = 4
+        status.luyuan_cycle_count = 318
+        status.luyuan_temperature_c = -8
+        status.luyuan_max_cell_voltage_mv = 4010
+        status.luyuan_min_cell_voltage_mv = 3685
+        status.luyuan_current_a = 0.0
+        status.luyuan_total_voltage_v = 41
+        status.luyuan_soh_percent = 68
         return status
 
     @staticmethod

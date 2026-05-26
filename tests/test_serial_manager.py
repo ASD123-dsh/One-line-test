@@ -3,7 +3,11 @@ from unittest.mock import patch
 
 from PyQt5.QtCore import QCoreApplication
 
-from serial_comm.serial_manager import SEND_MODE_BATTERY_SINGLE_WIRE, SerialManager
+from serial_comm.serial_manager import (
+    SEND_MODE_BATTERY_SINGLE_WIRE,
+    SEND_MODE_LUYUAN_BMS_SIF,
+    SerialManager,
+)
 
 
 _APP = QCoreApplication.instance() or QCoreApplication([])
@@ -152,6 +156,24 @@ class SerialManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.serial_port.break_history[-1], True)
         self.assertEqual([call.args[0] for call in mock_sleep.call_args_list[:4]], [62, 2, 4, 2])
         self.assertEqual(mock_sleep.call_args_list[-1].args[0], 20)
+
+    def test_luyuan_bms_mode_uses_msb_first_pulses_and_releases_after_stop(self):
+        frame_data = [0x3A, 0xD8, 0x58, 0x34, 0x12, 0x85, 0x72, 0x10, 0xF8, 0x0F, 0xD2, 0x04, 0x36, 0x61, 0x2B]
+
+        with patch.object(self.manager, "_sleep_ms") as mock_sleep:
+            success, error = self.manager.send_single_frame(
+                frame_data,
+                skip_ui_update=True,
+                send_mode=SEND_MODE_LUYUAN_BMS_SIF,
+            )
+
+        self.assertTrue(success, error)
+        self.assertEqual(error, "")
+        self.assertIsNone(self.manager.serial_port.last_payload)
+        self.assertEqual(self.manager.serial_port.break_history[:4], [True, False, True, False])
+        self.assertEqual(self.manager.serial_port.break_history[-1], False)
+        self.assertEqual([call.args[0] for call in mock_sleep.call_args_list[:6]], [40, 2, 4, 2, 4, 2])
+        self.assertEqual(mock_sleep.call_args_list[-1].args[0], 10)
 
 
 if __name__ == "__main__":

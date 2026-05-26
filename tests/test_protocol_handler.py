@@ -7,6 +7,7 @@ from protocol.protocol_handler import (
     PROTOCOL_FZ_SIF,
     PROTOCOL_HANGZHOU_ANXIAN,
     PROTOCOL_LITHIUM_BMS,
+    PROTOCOL_LUYUAN_BMS,
     PROTOCOL_RUILUN,
     PROTOCOL_WUXI_YIGE,
     PROTOCOL_XINCHI,
@@ -207,6 +208,43 @@ class ProtocolHandlerTests(unittest.TestCase):
         self.assertTrue(success, error)
         self.assertEqual(frame, [58, 213, 88, 52, 18, 251, 31, 2, 36, 237])
 
+    def test_luyuan_bms_frame_uses_15_bytes_sum_checksum_and_msb_sign_magnitude(self):
+        status = StatusBits(protocol_name=PROTOCOL_LUYUAN_BMS)
+        status.luyuan_charge_mos = True
+        status.luyuan_discharge_mos = True
+        status.luyuan_charge_enable = True
+        status.luyuan_charger_connected = True
+        status.soc_percent = 88
+        status.luyuan_cycle_count = 0x1234
+        status.luyuan_temperature_c = -5
+        status.luyuan_max_cell_voltage_mv = 4210
+        status.luyuan_min_cell_voltage_mv = 4088
+        status.luyuan_current_a = 12.34
+        status.luyuan_total_voltage_v = 54
+        status.luyuan_soh_percent = 97
+
+        success, frame, error = self.handler.generate_frame_for_preview(status)
+
+        self.assertTrue(success, error)
+        self.assertEqual(
+            frame,
+            [58, 216, 88, 52, 18, 133, 114, 16, 248, 15, 210, 4, 54, 97, 43],
+        )
+        self.assertEqual(
+            self.handler.get_protocol_send_mode(PROTOCOL_LUYUAN_BMS),
+            "luyuan_bms_sif",
+        )
+
+    def test_luyuan_bms_rejects_out_of_range_current(self):
+        status = StatusBits(protocol_name=PROTOCOL_LUYUAN_BMS)
+        status.luyuan_current_a = 400.0
+
+        success, frame, error = self.handler.generate_frame_for_preview(status)
+
+        self.assertFalse(success)
+        self.assertEqual(frame, [])
+        self.assertIn("绿源BMS电流", error)
+
     def test_lithium_bms_frame_uses_xor_checksum_and_signed_temperature_encoding(self):
         status = StatusBits(protocol_name=PROTOCOL_LITHIUM_BMS)
         status.lithium_bms_alarm_enable = True
@@ -250,6 +288,7 @@ class ProtocolHandlerTests(unittest.TestCase):
             PROTOCOL_YADEA,
             PROTOCOL_DONGWEI_GTXH,
             PROTOCOL_XINCHI,
+            PROTOCOL_LUYUAN_BMS,
             PROTOCOL_LITHIUM_BMS,
             PROTOCOL_BATTERY_SINGLE_WIRE,
         ):

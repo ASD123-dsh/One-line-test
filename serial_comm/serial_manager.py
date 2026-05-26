@@ -16,6 +16,7 @@ from PyQt5.QtCore import QObject, QTimer, pyqtSignal
 
 SEND_MODE_UART = "uart"
 SEND_MODE_BATTERY_SINGLE_WIRE = "battery_single_wire"
+SEND_MODE_LUYUAN_BMS_SIF = "luyuan_bms_sif"
 
 
 @dataclass
@@ -127,6 +128,8 @@ class SerialManager(QObject):
 
         if send_mode == SEND_MODE_BATTERY_SINGLE_WIRE:
             return self._send_battery_single_wire_frame(frame_data, skip_ui_update)
+        if send_mode == SEND_MODE_LUYUAN_BMS_SIF:
+            return self._send_luyuan_bms_sif_frame(frame_data, skip_ui_update)
         if send_mode != SEND_MODE_UART:
             return False, f"不支持的发送模式: {send_mode}"
 
@@ -171,14 +174,53 @@ class SerialManager(QObject):
         if len(frame_data) != 6:
             return False, "电池单线通讯协议帧长度必须为 6 字节"
 
+        return self._send_sif_frame(
+            frame_data,
+            bit_indices=range(8),
+            sync_low_ms=62,
+            sync_high_ms=2,
+            stop_low_ms=20,
+            release_after_stop=False,
+            protocol_label="电池单线通讯协议",
+            skip_ui_update=skip_ui_update,
+        )
+
+    def _send_luyuan_bms_sif_frame(
+        self, frame_data: List[int], skip_ui_update: bool = False
+    ) -> Tuple[bool, str]:
+        if len(frame_data) != 15:
+            return False, "绿源BMS一线通协议帧长度必须为 15 字节"
+
+        return self._send_sif_frame(
+            frame_data,
+            bit_indices=range(7, -1, -1),
+            sync_low_ms=40,
+            sync_high_ms=2,
+            stop_low_ms=10,
+            release_after_stop=True,
+            protocol_label="绿源BMS一线通协议",
+            skip_ui_update=skip_ui_update,
+        )
+
+    def _send_sif_frame(
+        self,
+        frame_data: List[int],
+        bit_indices,
+        sync_low_ms: int,
+        sync_high_ms: int,
+        stop_low_ms: int,
+        release_after_stop: bool,
+        protocol_label: str,
+        skip_ui_update: bool = False,
+    ) -> Tuple[bool, str]:
         try:
             self._set_tx_low(True)
-            self._sleep_ms(62)
+            self._sleep_ms(sync_low_ms)
             self._set_tx_low(False)
-            self._sleep_ms(2)
+            self._sleep_ms(sync_high_ms)
 
             for byte_value in frame_data:
-                for bit_index in range(8):
+                for bit_index in bit_indices:
                     bit_value = (byte_value >> bit_index) & 0x01
                     low_ms = 2 if bit_value else 4
                     high_ms = 4 if bit_value else 2
@@ -188,14 +230,16 @@ class SerialManager(QObject):
                     self._sleep_ms(high_ms)
 
             self._set_tx_low(True)
-            self._sleep_ms(20)
+            self._sleep_ms(stop_low_ms)
+            if release_after_stop:
+                self._set_tx_low(False)
 
             if not skip_ui_update:
                 timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
                 self.data_sent.emit(frame_data, timestamp)
             return True, ""
         except Exception as e:
-            error_msg = f"电池单线通讯协议发送失败: {e}"
+            error_msg = f"{protocol_label}发送失败: {e}"
             if not skip_ui_update:
                 self.send_error.emit(error_msg)
             return False, error_msg
@@ -225,7 +269,11 @@ class SerialManager(QObject):
             return False, "串口未连接"
         if not frame_sequence:
             return False, "循环数据包组不能为空"
-        if send_mode not in {SEND_MODE_UART, SEND_MODE_BATTERY_SINGLE_WIRE}:
+        if send_mode not in {
+            SEND_MODE_UART,
+            SEND_MODE_BATTERY_SINGLE_WIRE,
+            SEND_MODE_LUYUAN_BMS_SIF,
+        }:
             return False, f"不支持的发送模式: {send_mode}"
 
         normalized_frames: List[List[int]] = []

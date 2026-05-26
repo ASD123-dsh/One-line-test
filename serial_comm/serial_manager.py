@@ -4,6 +4,7 @@
 Serial communication management.
 """
 
+import ctypes
 from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Optional, Tuple
@@ -180,7 +181,7 @@ class SerialManager(QObject):
             sync_low_ms=62,
             sync_high_ms=2,
             stop_low_ms=20,
-            release_after_stop=False,
+            release_after_stop=True,
             protocol_label="电池单线通讯协议",
             skip_ui_update=skip_ui_update,
         )
@@ -213,6 +214,7 @@ class SerialManager(QObject):
         protocol_label: str,
         skip_ui_update: bool = False,
     ) -> Tuple[bool, str]:
+        self._begin_precise_timing()
         try:
             self._set_tx_low(True)
             self._sleep_ms(sync_low_ms)
@@ -239,17 +241,48 @@ class SerialManager(QObject):
                 self.data_sent.emit(frame_data, timestamp)
             return True, ""
         except Exception as e:
+            self._set_tx_low(False)
             error_msg = f"{protocol_label}发送失败: {e}"
             if not skip_ui_update:
                 self.send_error.emit(error_msg)
             return False, error_msg
+        finally:
+            self._end_precise_timing()
 
     def _set_tx_low(self, is_low: bool):
         if self.serial_port is not None:
             self.serial_port.break_condition = bool(is_low)
 
+    def _begin_precise_timing(self):
+        try:
+            ctypes.windll.winmm.timeBeginPeriod(1)
+        except Exception:
+            pass
+
+    def _end_precise_timing(self):
+        try:
+            ctypes.windll.winmm.timeEndPeriod(1)
+        except Exception:
+            pass
+
     def _sleep_ms(self, duration_ms: int):
-        time.sleep(duration_ms / 1000.0)
+        if duration_ms <= 0:
+            return
+
+        duration_s = duration_ms / 1000.0
+        deadline = time.perf_counter() + duration_s
+
+        if duration_ms <= 10:
+            while time.perf_counter() < deadline:
+                pass
+            return
+
+        coarse_sleep_s = duration_s - 0.001
+        if coarse_sleep_s > 0:
+            # Leave a short busy-wait tail to reduce overshoot on custom SIF pulses.
+            time.sleep(coarse_sleep_s)
+        while time.perf_counter() < deadline:
+            pass
 
     def start_cyclic_send(
         self,

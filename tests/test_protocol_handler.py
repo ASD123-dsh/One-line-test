@@ -208,7 +208,7 @@ class ProtocolHandlerTests(unittest.TestCase):
         self.assertTrue(success, error)
         self.assertEqual(frame, [58, 213, 88, 52, 18, 251, 31, 2, 36, 237])
 
-    def test_luyuan_bms_frame_uses_15_bytes_sum_checksum_and_msb_sign_magnitude(self):
+    def test_luyuan_bms_frame_uses_15_bytes_sum_checksum_and_signed_temperature_byte(self):
         status = StatusBits(protocol_name=PROTOCOL_LUYUAN_BMS)
         status.luyuan_charge_mos = True
         status.luyuan_discharge_mos = True
@@ -228,11 +228,11 @@ class ProtocolHandlerTests(unittest.TestCase):
         self.assertTrue(success, error)
         self.assertEqual(
             frame,
-            [58, 216, 88, 52, 18, 133, 114, 16, 248, 15, 210, 4, 54, 97, 43],
+            [58, 216, 88, 52, 18, 251, 114, 16, 248, 15, 210, 4, 54, 97, 161],
         )
         self.assertEqual(
             self.handler.get_protocol_send_mode(PROTOCOL_LUYUAN_BMS),
-            "luyuan_bms_sif",
+            "uart",
         )
 
     def test_luyuan_bms_rejects_out_of_range_current(self):
@@ -274,7 +274,7 @@ class ProtocolHandlerTests(unittest.TestCase):
         self.assertEqual(frame, [0, 88, 0, 0, 0, 88])
         self.assertEqual(
             self.handler.get_protocol_send_mode(PROTOCOL_BATTERY_SINGLE_WIRE),
-            "battery_single_wire",
+            "uart",
         )
 
     def test_supported_protocols_have_byte_descriptions(self):

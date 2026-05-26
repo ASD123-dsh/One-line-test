@@ -139,7 +139,7 @@ class SerialManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.cyclic_send_mode, SEND_MODE_BATTERY_SINGLE_WIRE)
         mock_start.assert_called_once_with(2000)
 
-    def test_battery_single_wire_mode_uses_break_condition_pulses(self):
+    def test_battery_single_wire_mode_uses_break_condition_pulses_and_releases_after_stop(self):
         frame_data = [0x00, 0x01, 0x00, 0x00, 0x00, 0x01]
 
         with patch.object(self.manager, "_sleep_ms") as mock_sleep:
@@ -153,7 +153,7 @@ class SerialManagerTests(unittest.TestCase):
         self.assertEqual(error, "")
         self.assertIsNone(self.manager.serial_port.last_payload)
         self.assertEqual(self.manager.serial_port.break_history[:4], [True, False, True, False])
-        self.assertEqual(self.manager.serial_port.break_history[-1], True)
+        self.assertEqual(self.manager.serial_port.break_history[-1], False)
         self.assertEqual([call.args[0] for call in mock_sleep.call_args_list[:4]], [62, 2, 4, 2])
         self.assertEqual(mock_sleep.call_args_list[-1].args[0], 20)
 

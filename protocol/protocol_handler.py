@@ -226,10 +226,10 @@ class ProtocolHandler:
     def get_protocol_send_mode(self, protocol_name: str) -> str:
         """获取协议的串口发送模式。"""
 
-        if protocol_name == PROTOCOL_LUYUAN_BMS:
-            return "luyuan_bms_sif"
-        if protocol_name == PROTOCOL_BATTERY_SINGLE_WIRE:
-            return "battery_single_wire"
+        if protocol_name in {PROTOCOL_LUYUAN_BMS, PROTOCOL_BATTERY_SINGLE_WIRE}:
+            # The receive/forward platform expects raw UART bytes from the host
+            # and generates the custom SIF waveform on-device based on frame length.
+            return "uart"
         return "uart"
 
     def get_current_xinsiwei_sequence(self) -> int:
@@ -711,7 +711,7 @@ class ProtocolHandler:
         frame[2] = status.soc_percent & 0xFF
         frame[3] = status.luyuan_cycle_count & 0xFF
         frame[4] = (status.luyuan_cycle_count >> 8) & 0xFF
-        frame[5] = self._encode_sign_magnitude_byte(status.luyuan_temperature_c)
+        frame[5] = self._encode_signed_byte(status.luyuan_temperature_c)
         frame[6] = status.luyuan_max_cell_voltage_mv & 0xFF
         frame[7] = (status.luyuan_max_cell_voltage_mv >> 8) & 0xFF
         frame[8] = status.luyuan_min_cell_voltage_mv & 0xFF
@@ -1012,6 +1012,9 @@ class ProtocolHandler:
             return 0x80 | magnitude
         return magnitude & 0x7F
 
+    def _encode_signed_byte(self, value: int) -> int:
+        return int(value) & 0xFF
+
     def _encode_lithium_bms_temperature(self, temp_c: int) -> int:
         return self._encode_sign_magnitude_byte(temp_c)
 
@@ -1213,7 +1216,7 @@ class ProtocolHandler:
                 "Byte1 SOC",
                 "Byte2 循环次数低字节",
                 "Byte3 循环次数高字节",
-                "Byte4 电池温度(原码有符号)",
+                "Byte4 电池温度(有符号8位)",
                 "Byte5 最高电芯电压低字节(mV)",
                 "Byte6 最高电芯电压高字节(mV)",
                 "Byte7 最低电芯电压低字节(mV)",

@@ -16,6 +16,7 @@ PROTOCOL_HANGZHOU_ANXIAN = "杭州安显协议"
 PROTOCOL_CHANGZHOU_XINSIWEI = "常州新思维协议"
 PROTOCOL_WUXI_YIGE = "无锡一格Y67协议"
 PROTOCOL_YADEA = "雅迪协议"
+PROTOCOL_YOUYIBAO = "优仪宝一线通协议"
 PROTOCOL_DONGWEI_GTXH = "东威GTXH协议"
 PROTOCOL_XINCHI = "芯驰BMS协议"
 PROTOCOL_LUYUAN_BMS = "绿源BMS一线通协议"
@@ -30,6 +31,7 @@ SUPPORTED_PROTOCOLS = [
     PROTOCOL_CHANGZHOU_XINSIWEI,
     PROTOCOL_WUXI_YIGE,
     PROTOCOL_YADEA,
+    PROTOCOL_YOUYIBAO,
     PROTOCOL_DONGWEI_GTXH,
     PROTOCOL_XINCHI,
     PROTOCOL_LUYUAN_BMS,
@@ -442,6 +444,8 @@ class ProtocolHandler:
             return self._generate_wuxi_yige_frame(status)
         if protocol_name == PROTOCOL_YADEA:
             return self._generate_yadea_frame(status)
+        if protocol_name == PROTOCOL_YOUYIBAO:
+            return self._generate_youyibao_frame(status)
         if protocol_name == PROTOCOL_DONGWEI_GTXH:
             return self._generate_dongwei_gtxh_frame(status)
         if protocol_name == PROTOCOL_XINCHI:
@@ -470,6 +474,8 @@ class ProtocolHandler:
             return self._generate_wuxi_yige_frame(status)
         if protocol_name == PROTOCOL_YADEA:
             return self._generate_yadea_frame(status)
+        if protocol_name == PROTOCOL_YOUYIBAO:
+            return self._generate_youyibao_frame(status)
         if protocol_name == PROTOCOL_DONGWEI_GTXH:
             return self._generate_dongwei_gtxh_frame(status)
         if protocol_name == PROTOCOL_XINCHI:
@@ -657,6 +663,27 @@ class ProtocolHandler:
         frame[11] = self._xor_checksum(frame[:11])
         return True, frame, ""
 
+    def _generate_youyibao_frame(self, status: StatusBits) -> Tuple[bool, List[int], str]:
+        is_valid, error_msg = self.validate_status_bits(status)
+        if not is_valid:
+            return False, [], error_msg
+
+        hall_count = self._resolve_hall_count(status)
+        frame = [0] * 12
+        frame[0] = 0x08
+        frame[1] = 0x61
+        frame[2] = self._encode_youyibao_status1(status) & 0x0F
+        frame[3] = self._encode_generic_status2(status)
+        frame[4] = self._encode_generic_status3(status, PROTOCOL_YOUYIBAO)
+        frame[5] = self._encode_generic_status4(status, PROTOCOL_YOUYIBAO)
+        frame[6] = self._encode_signed_current(status.current_a)
+        frame[7] = (hall_count >> 8) & 0xFF
+        frame[8] = hall_count & 0xFF
+        frame[9] = status.soc_percent & 0xFF
+        frame[10] = status.current_percentage & 0xFF
+        frame[11] = self._xor_checksum(frame[:11])
+        return True, frame, ""
+
     def _generate_dongwei_gtxh_frame(self, status: StatusBits) -> Tuple[bool, List[int], str]:
         is_valid, error_msg = self.validate_status_bits(status)
         if not is_valid:
@@ -805,6 +832,14 @@ class ProtocolHandler:
             value |= 0x02
         return value
 
+    def _encode_youyibao_status1(self, status: StatusBits) -> int:
+        value = 0
+        if status.p_gear_protect:
+            value |= 0x08
+        if status.side_stand:
+            value |= 0x04
+        return value
+
     def _encode_dongwei_status1(self, status: StatusBits) -> int:
         value = 0
         if status.p_gear_protect:
@@ -906,7 +941,7 @@ class ProtocolHandler:
         if protocol_name in {PROTOCOL_WUXI_YIGE, PROTOCOL_FZ_SIF}:
             if status.cloud_power_mode:
                 value |= 0x80
-        elif protocol_name in {PROTOCOL_RUILUN, PROTOCOL_DONGWEI_GTXH}:
+        elif protocol_name in {PROTOCOL_RUILUN, PROTOCOL_YOUYIBAO, PROTOCOL_DONGWEI_GTXH}:
             if status.current_70_flag:
                 value |= 0x80
 
@@ -1181,6 +1216,20 @@ class ProtocolHandler:
                 "Status6 霍尔计数高字节",
                 "Status7 霍尔计数低字节",
                 "Status8 电量百分比",
+                "Status9 电流百分比",
+                "校验和 (XOR)",
+            ],
+            PROTOCOL_YOUYIBAO: [
+                "设备编码 (固定 0x08)",
+                "流水号 (固定 0x61)",
+                "Status1 低4位 (P挡/侧撑)",
+                "Status2 故障/巡航/助力",
+                "Status3 电机/刹车/保护/速度模式",
+                "Status4 70%电流/一键通/EKK/保护",
+                "Status5 运行电流",
+                "Status6 霍尔计数高字节",
+                "Status7 霍尔计数低字节",
+                "Status8 电压/电量百分比",
                 "Status9 电流百分比",
                 "校验和 (XOR)",
             ],
@@ -1508,6 +1557,41 @@ class PresetScenarios:
     @staticmethod
     def yadea_fault_scenario() -> StatusBits:
         status = StatusBits(protocol_name=PROTOCOL_YADEA)
+        status.hall_count = 0
+        status.soc_percent = 18
+        status.current_percentage = 0
+        status.hall_fault = True
+        status.controller_fault = True
+        status.under_voltage = True
+        status.side_stand = True
+        status.p_gear_protect = True
+        return status
+
+    @staticmethod
+    def youyibao_normal_running() -> StatusBits:
+        status = StatusBits(protocol_name=PROTOCOL_YOUYIBAO)
+        status.hall_count = 3200
+        status.soc_percent = 80
+        status.current_percentage = 55
+        status.motor_running = True
+        status.speed_mode = 3
+        status.current_a = 12
+        return status
+
+    @staticmethod
+    def youyibao_energy_recovery() -> StatusBits:
+        status = StatusBits(protocol_name=PROTOCOL_YOUYIBAO)
+        status.hall_count = 2600
+        status.soc_percent = 62
+        status.current_percentage = 25
+        status.regen_charging = True
+        status.current_a = -2
+        status.speed_mode = 2
+        return status
+
+    @staticmethod
+    def youyibao_fault_scenario() -> StatusBits:
+        status = StatusBits(protocol_name=PROTOCOL_YOUYIBAO)
         status.hall_count = 0
         status.soc_percent = 18
         status.current_percentage = 0

@@ -33,6 +33,7 @@ from protocol.protocol_handler import (
     PROTOCOL_XINCHI,
     PROTOCOL_XINRI,
     PROTOCOL_YADEA,
+    PROTOCOL_YOUYIBAO,
     ProtocolHandler,
     StatusBits,
     PresetScenarios,
@@ -374,6 +375,7 @@ class MainWindow(QMainWindow):
                 PROTOCOL_CHANGZHOU_XINSIWEI,
                 PROTOCOL_WUXI_YIGE,
                 PROTOCOL_YADEA,
+                PROTOCOL_YOUYIBAO,
                 PROTOCOL_DONGWEI_GTXH,
                 PROTOCOL_XINCHI,
                 PROTOCOL_LUYUAN_BMS,
@@ -514,6 +516,13 @@ class MainWindow(QMainWindow):
                 ("单撑断电检测 (D3)", True),
                 ("备用 (D2)", False),
                 ("启动保护 (D1)", True),
+                ("备用 (D0)", False),
+            ]
+        elif protocol == PROTOCOL_YOUYIBAO:
+            labels = [
+                ("P档驻车 (D3)", True),
+                ("侧撑标志 (D2)", True),
+                ("备用 (D1)", False),
                 ("备用 (D0)", False),
             ]
         else:
@@ -695,7 +704,7 @@ class MainWindow(QMainWindow):
         if self.current_protocol in {PROTOCOL_WUXI_YIGE, PROTOCOL_FZ_SIF}:
             d7_text = "云动力模式(速度提升) (D7)"
             d7_enabled = True
-        elif self.current_protocol in {PROTOCOL_RUILUN, PROTOCOL_DONGWEI_GTXH}:
+        elif self.current_protocol in {PROTOCOL_RUILUN, PROTOCOL_DONGWEI_GTXH, PROTOCOL_YOUYIBAO}:
             d7_text = "70%电流标志 (D7)"
             d7_enabled = True
         else:
@@ -811,6 +820,8 @@ class MainWindow(QMainWindow):
             status8_text = "电池电量/电压比例值 (Status8):"
         elif protocol == PROTOCOL_YADEA:
             status8_text = "电量百分比 (Status8):"
+        elif protocol == PROTOCOL_YOUYIBAO:
+            status8_text = "电压/电量百分比 (Status8):"
         elif protocol == PROTOCOL_DONGWEI_GTXH:
             status8_text = "电压/电量百分比 (Status8):"
         else:
@@ -841,7 +852,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(status8_layout, 3, 1)
 
         row_index = 4
-        if protocol in {PROTOCOL_YADEA, PROTOCOL_DONGWEI_GTXH}:
+        if protocol in {PROTOCOL_YADEA, PROTOCOL_YOUYIBAO, PROTOCOL_DONGWEI_GTXH}:
             layout.addWidget(QLabel("电流百分比 (Status9):"), row_index, 0)
             self.current_percent_spin = QSpinBox()
             self.current_percent_spin.setRange(0, 100)
@@ -849,7 +860,7 @@ class MainWindow(QMainWindow):
             layout.addWidget(self.current_percent_spin, row_index, 1)
             row_index += 1
 
-        if protocol == PROTOCOL_YADEA:
+        if protocol in {PROTOCOL_YADEA, PROTOCOL_YOUYIBAO}:
             return widget
 
         # Status9 - 系统电压
@@ -1214,6 +1225,8 @@ class MainWindow(QMainWindow):
             self.switch_to_wuxi_yige_protocol()
         elif protocol_name == PROTOCOL_YADEA:
             self.switch_to_yadea_protocol()
+        elif protocol_name == PROTOCOL_YOUYIBAO:
+            self.switch_to_youyibao_protocol()
         elif protocol_name == PROTOCOL_DONGWEI_GTXH:
             self.switch_to_dongwei_gtxh_protocol()
         elif protocol_name == PROTOCOL_XINCHI:
@@ -1293,6 +1306,13 @@ class MainWindow(QMainWindow):
     def switch_to_yadea_protocol(self):
         """切换到雅迪协议"""
         self.current_status = PresetScenarios.yadea_normal_running()
+        self.show_ruilun_status_config()
+        self.normal_radio.setChecked(True)
+        self.on_scenario_changed()
+
+    def switch_to_youyibao_protocol(self):
+        """切换到优仪宝一线通协议"""
+        self.current_status = PresetScenarios.youyibao_normal_running()
         self.show_ruilun_status_config()
         self.normal_radio.setChecked(True)
         self.on_scenario_changed()
@@ -2318,6 +2338,8 @@ class MainWindow(QMainWindow):
                 self.load_wuxi_yige_preset_scenario(scenario_id)
             elif self.current_protocol == PROTOCOL_YADEA:
                 self.load_yadea_preset_scenario(scenario_id)
+            elif self.current_protocol == PROTOCOL_YOUYIBAO:
+                self.load_youyibao_preset_scenario(scenario_id)
             elif self.current_protocol == PROTOCOL_DONGWEI_GTXH:
                 self.load_dongwei_gtxh_preset_scenario(scenario_id)
             elif self.current_protocol == PROTOCOL_XINCHI:
@@ -2412,6 +2434,19 @@ class MainWindow(QMainWindow):
             self.current_status = PresetScenarios.yadea_fault_scenario()
         else:
             self.current_status = StatusBits(protocol_name=PROTOCOL_YADEA)
+
+        self.update_ruilun_ui_from_status()
+
+    def load_youyibao_preset_scenario(self, scenario_id):
+        """加载优仪宝一线通协议预设场景"""
+        if scenario_id == 0:
+            self.current_status = PresetScenarios.youyibao_normal_running()
+        elif scenario_id == 1:
+            self.current_status = PresetScenarios.youyibao_energy_recovery()
+        elif scenario_id == 2:
+            self.current_status = PresetScenarios.youyibao_fault_scenario()
+        else:
+            self.current_status = StatusBits(protocol_name=PROTOCOL_YOUYIBAO)
 
         self.update_ruilun_ui_from_status()
 
@@ -2614,6 +2649,11 @@ class MainWindow(QMainWindow):
             self.distance_mode_cb.setChecked(getattr(status, "side_stand", False))
             self.speed_alarm_cb.setChecked(False)
             self.p_gear_protect_cb.setChecked(getattr(status, "p_gear_protect", False))
+            self.tcs_status_cb.setChecked(False)
+        elif self.current_protocol == PROTOCOL_YOUYIBAO:
+            self.distance_mode_cb.setChecked(getattr(status, "p_gear_protect", False))
+            self.speed_alarm_cb.setChecked(getattr(status, "side_stand", False))
+            self.p_gear_protect_cb.setChecked(False)
             self.tcs_status_cb.setChecked(False)
         else:
             self.distance_mode_cb.setChecked(getattr(status, "distance_mode", False))
@@ -2968,6 +3008,9 @@ class MainWindow(QMainWindow):
             status.side_stand = self.distance_mode_cb.isChecked()
             status.protocol_speed_limit = self.speed_alarm_cb.isChecked()
             status.p_gear_protect = self.p_gear_protect_cb.isChecked()
+        elif self.current_protocol == PROTOCOL_YOUYIBAO:
+            status.p_gear_protect = self.distance_mode_cb.isChecked()
+            status.side_stand = self.speed_alarm_cb.isChecked()
         elif self.current_protocol == PROTOCOL_DONGWEI_GTXH:
             status.p_gear_protect = self.p_gear_protect_cb.isChecked()
         elif self.current_protocol in {PROTOCOL_WUXI_YIGE, PROTOCOL_YADEA}:

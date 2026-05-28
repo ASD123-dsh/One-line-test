@@ -13,6 +13,7 @@ from protocol.protocol_handler import (
     PROTOCOL_XINCHI,
     PROTOCOL_XINRI,
     PROTOCOL_YADEA,
+    PROTOCOL_YOUYIBAO,
     PresetScenarios,
     ProtocolHandler,
     StatusBits,
@@ -155,6 +156,29 @@ class ProtocolHandlerTests(unittest.TestCase):
         self.assertTrue(success, error)
         self.assertEqual(frame, [8, 97, 10, 66, 201, 2, 254, 0, 42, 75, 60, 73])
 
+    def test_youyibao_frame_uses_fixed_header_low_nibble_status1_and_percentage_fields(self):
+        status = StatusBits(protocol_name=PROTOCOL_YOUYIBAO)
+        status.p_gear_protect = True
+        status.side_stand = True
+        status.hall_fault = True
+        status.assist = True
+        status.motor_running = True
+        status.regen_charging = True
+        status.speed_mode = 2
+        status.current_70_flag = True
+        status.one_key_enable = True
+        status.electronic_brake = True
+        status.current_a = -2
+        status.hall_count = 0x002A
+        status.soc_percent = 75
+        status.current_percentage = 60
+
+        success, frame, error = self.handler.generate_frame_for_preview(status)
+
+        self.assertTrue(success, error)
+        self.assertEqual(frame, [8, 97, 12, 66, 74, 194, 254, 0, 42, 75, 60, 12])
+        self.assertEqual(self.handler.get_protocol_send_mode(PROTOCOL_YOUYIBAO), "uart")
+
     def test_dongwei_gtxh_frame_supports_voltage_state_and_current_percentage(self):
         status = StatusBits(protocol_name=PROTOCOL_DONGWEI_GTXH)
         status.voltage_48v = True
@@ -286,6 +310,7 @@ class ProtocolHandlerTests(unittest.TestCase):
             PROTOCOL_CHANGZHOU_XINSIWEI,
             PROTOCOL_WUXI_YIGE,
             PROTOCOL_YADEA,
+            PROTOCOL_YOUYIBAO,
             PROTOCOL_DONGWEI_GTXH,
             PROTOCOL_XINCHI,
             PROTOCOL_LUYUAN_BMS,

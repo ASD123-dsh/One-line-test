@@ -15,8 +15,11 @@ PROTOCOL_XINRI = "新日协议"
 PROTOCOL_HANGZHOU_ANXIAN = "杭州安显协议"
 PROTOCOL_CHANGZHOU_XINSIWEI = "常州新思维协议"
 PROTOCOL_WUXI_YIGE = "无锡一格Y67协议"
+PROTOCOL_TAILING_Y34B = "无锡台铃Y34B协议"
+PROTOCOL_TAILING_Y34F = "无锡台铃Y34F协议"
 PROTOCOL_YADEA = "雅迪协议"
 PROTOCOL_YOUYIBAO = "优仪宝一线通协议"
+PROTOCOL_JINGXIAN = "精显一线通协议"
 PROTOCOL_DONGWEI_GTXH = "东威GTXH协议"
 PROTOCOL_XINCHI = "芯驰BMS协议"
 PROTOCOL_LUYUAN_BMS = "绿源BMS一线通协议"
@@ -30,8 +33,11 @@ SUPPORTED_PROTOCOLS = [
     PROTOCOL_HANGZHOU_ANXIAN,
     PROTOCOL_CHANGZHOU_XINSIWEI,
     PROTOCOL_WUXI_YIGE,
+    PROTOCOL_TAILING_Y34B,
+    PROTOCOL_TAILING_Y34F,
     PROTOCOL_YADEA,
     PROTOCOL_YOUYIBAO,
+    PROTOCOL_JINGXIAN,
     PROTOCOL_DONGWEI_GTXH,
     PROTOCOL_XINCHI,
     PROTOCOL_LUYUAN_BMS,
@@ -57,7 +63,7 @@ class ProtocolConfig:
 
     tosc_us: int = 100
     baud_rate: int = 9600
-    send_interval_ms: int = 1000
+    send_interval_ms: int = 500
 
 
 @dataclass
@@ -104,6 +110,24 @@ class StatusBits:
     electronic_brake: bool = False
     speed_limit: bool = False
     cloud_power_mode: bool = False
+
+    # 台铃 Y34 扩展状态
+    tailing_national_standard: bool = False
+    tailing_actual_speed_mode: bool = False
+    tailing_tire_pressure_low: bool = False
+    tailing_tcs_indicator: bool = False
+    tailing_hdc_indicator: bool = False
+    tailing_dual_undervoltage: bool = False
+    tailing_seat_state: int = 0
+    tailing_dual_soc: bool = False
+    tailing_display_sleep: bool = False
+    tailing_speed_15kmh_warning: bool = False
+    tailing_brake_fault: bool = False
+    tailing_display_voltage_from_data: bool = False
+    tailing_battery_over_temp: bool = False
+    tailing_battery_over_current: bool = False
+    tailing_battery_over_voltage: bool = False
+    tailing_real_time_voltage_v: float = 48.0
 
     # 运行数据
     current_a: int = 0
@@ -192,6 +216,7 @@ class ProtocolHandler:
         self.status = StatusBits()
         self._xinsiwei_sequence_counter = 1
         self._hangzhou_sequence_counter = 1
+        self._jingxian_sequence_counter = 1
 
     def resolve_protocol_name(self, status: StatusBits) -> str:
         """从状态对象解析当前协议。"""
@@ -208,8 +233,12 @@ class ProtocolHandler:
 
         if protocol_name == PROTOCOL_BATTERY_SINGLE_WIRE:
             return 6
+        if protocol_name == PROTOCOL_TAILING_Y34F:
+            return 15
         if protocol_name == PROTOCOL_LUYUAN_BMS:
             return 15
+        if protocol_name == PROTOCOL_TAILING_Y34B:
+            return 13
         if protocol_name == PROTOCOL_XINCHI:
             return 10
         return 12
@@ -228,7 +257,11 @@ class ProtocolHandler:
     def get_protocol_send_mode(self, protocol_name: str) -> str:
         """获取协议的串口发送模式。"""
 
-        if protocol_name in {PROTOCOL_LUYUAN_BMS, PROTOCOL_BATTERY_SINGLE_WIRE}:
+        if protocol_name in {
+            PROTOCOL_JINGXIAN,
+            PROTOCOL_LUYUAN_BMS,
+            PROTOCOL_BATTERY_SINGLE_WIRE,
+        }:
             # The receive/forward platform expects raw UART bytes from the host
             # and generates the custom SIF waveform on-device based on frame length.
             return "uart"
@@ -272,12 +305,34 @@ class ProtocolHandler:
             raise ValueError("杭州安显序号起始值必须在 1-4095 范围内")
         self._hangzhou_sequence_counter = start_value
 
+    def get_current_jingxian_sequence(self) -> int:
+        """获取当前精显协议序号。"""
+
+        return self._jingxian_sequence_counter
+
+    def get_next_jingxian_sequence(self) -> int:
+        """获取下一精显协议序号并递增。"""
+
+        current_seq = self._jingxian_sequence_counter
+        self._jingxian_sequence_counter = (self._jingxian_sequence_counter + 1) & 0xFF
+        return current_seq
+
+    def reset_jingxian_sequence(self, start_value: int = 1):
+        """重置精显协议序号。"""
+
+        if not (0 <= start_value <= 255):
+            raise ValueError("精显协议序号起始值必须在 0-255 范围内")
+        self._jingxian_sequence_counter = start_value
+
     def validate_status_bits(self, status: StatusBits) -> Tuple[bool, str]:
         """校验状态字段是否合法。"""
 
         protocol_name = self.resolve_protocol_name(status)
         speed_mode_max = (
-            7 if protocol_name in {PROTOCOL_XINRI, PROTOCOL_YADEA, PROTOCOL_DONGWEI_GTXH} else 3
+            7
+            if protocol_name
+            in {PROTOCOL_XINRI, PROTOCOL_YADEA, PROTOCOL_JINGXIAN, PROTOCOL_DONGWEI_GTXH}
+            else 3
         )
         if not (0 <= status.speed_mode <= speed_mode_max):
             return False, f"当前协议的速度模式必须在 0-{speed_mode_max} 范围内"
@@ -303,6 +358,12 @@ class ProtocolHandler:
         if not (0 <= status.current_percentage <= 100):
             return False, "电流百分比必须在 0-100 范围内"
 
+        if not (0 <= status.tailing_seat_state <= 3):
+            return False, "台铃Y34F坐垫功能状态必须在 0-3 范围内"
+
+        if not (0.0 <= status.tailing_real_time_voltage_v <= 6553.5):
+            return False, "台铃实时电压必须在 0.0V 到 6553.5V 范围内"
+
         voltage_mask_count = sum(
             1 for field_name, _ in VOLTAGE_OPTIONS if getattr(status, field_name, False)
         )
@@ -318,6 +379,11 @@ class ProtocolHandler:
             unsupported_voltage_fields = ("voltage_24v", "voltage_36v", "voltage_80v")
             if any(getattr(status, field_name, False) for field_name in unsupported_voltage_fields):
                 return False, "FZ-sif协议的系统电压仅支持默认/48V/60V/64V/72V/84V/96V"
+
+        if protocol_name in {PROTOCOL_TAILING_Y34B, PROTOCOL_TAILING_Y34F}:
+            unsupported_voltage_fields = ("voltage_24v",)
+            if any(getattr(status, field_name, False) for field_name in unsupported_voltage_fields):
+                return False, "台铃Y34协议的系统电压仅支持默认/36V/48V/60V/64V/72V/80V/84V/96V"
 
         if protocol_name == PROTOCOL_CHANGZHOU_XINSIWEI and not (
             0 <= status.xinsiwei_sequence <= 4095
@@ -419,6 +485,18 @@ class ProtocolHandler:
         pulse &= 0x7F
         return pulse
 
+    def jingxian_pluscode_encrypt(self, sequence: int) -> int:
+        """精显协议 PlusCod 加密算法。"""
+
+        plus_code = (sequence + 0x9C) & 0xFF
+        plus_code ^= 0xF7
+        plus_code = (plus_code + 0xCF) & 0xFF
+        plus_code ^= 0xCA
+        plus_code ^= 0xBB
+        plus_code = (plus_code + 0x0B) & 0xFF
+        plus_code ^= 0xAA
+        return plus_code & 0x7F
+
     def generate_xinsiwei_frame_for_preview(self, status: StatusBits) -> Tuple[bool, List[int], str]:
         """生成常州新思维预览帧，不递增序号。"""
 
@@ -442,10 +520,16 @@ class ProtocolHandler:
             return self._generate_xinri_frame(status)
         if protocol_name == PROTOCOL_WUXI_YIGE:
             return self._generate_wuxi_yige_frame(status)
+        if protocol_name == PROTOCOL_TAILING_Y34B:
+            return self._generate_tailing_y34b_frame(status)
+        if protocol_name == PROTOCOL_TAILING_Y34F:
+            return self._generate_tailing_y34f_frame(status)
         if protocol_name == PROTOCOL_YADEA:
             return self._generate_yadea_frame(status)
         if protocol_name == PROTOCOL_YOUYIBAO:
             return self._generate_youyibao_frame(status)
+        if protocol_name == PROTOCOL_JINGXIAN:
+            return self._generate_jingxian_frame(status, preview=False)
         if protocol_name == PROTOCOL_DONGWEI_GTXH:
             return self._generate_dongwei_gtxh_frame(status)
         if protocol_name == PROTOCOL_XINCHI:
@@ -472,10 +556,16 @@ class ProtocolHandler:
             return self._generate_xinri_frame(status)
         if protocol_name == PROTOCOL_WUXI_YIGE:
             return self._generate_wuxi_yige_frame(status)
+        if protocol_name == PROTOCOL_TAILING_Y34B:
+            return self._generate_tailing_y34b_frame(status)
+        if protocol_name == PROTOCOL_TAILING_Y34F:
+            return self._generate_tailing_y34f_frame(status)
         if protocol_name == PROTOCOL_YADEA:
             return self._generate_yadea_frame(status)
         if protocol_name == PROTOCOL_YOUYIBAO:
             return self._generate_youyibao_frame(status)
+        if protocol_name == PROTOCOL_JINGXIAN:
+            return self._generate_jingxian_frame(status, preview=True)
         if protocol_name == PROTOCOL_DONGWEI_GTXH:
             return self._generate_dongwei_gtxh_frame(status)
         if protocol_name == PROTOCOL_XINCHI:
@@ -642,6 +732,54 @@ class ProtocolHandler:
         frame[11] = self._xor_checksum(frame[:11])
         return True, frame, ""
 
+    def _generate_tailing_y34b_frame(self, status: StatusBits) -> Tuple[bool, List[int], str]:
+        is_valid, error_msg = self.validate_status_bits(status)
+        if not is_valid:
+            return False, [], error_msg
+
+        speed_word = self._resolve_tailing_data67_word(status)
+        frame = [0] * 13
+        frame[0] = 0x08
+        frame[1] = 0x61
+        frame[2] = self._encode_tailing_status1(status)
+        frame[3] = self._encode_generic_status2(status, include_walk_mode=True)
+        frame[4] = self._encode_generic_status3(status, PROTOCOL_TAILING_Y34B)
+        frame[5] = self._encode_tailing_y34b_status4(status)
+        frame[6] = self._encode_signed_current(status.current_a)
+        frame[7] = (speed_word >> 8) & 0xFF
+        frame[8] = speed_word & 0xFF
+        frame[9] = self._encode_yige_soc(status)
+        frame[10] = self._encode_voltage_mask(status)
+        frame[11] = self._encode_tailing_status11(status)
+        frame[12] = self._xor_checksum(frame[:12])
+        return True, frame, ""
+
+    def _generate_tailing_y34f_frame(self, status: StatusBits) -> Tuple[bool, List[int], str]:
+        is_valid, error_msg = self.validate_status_bits(status)
+        if not is_valid:
+            return False, [], error_msg
+
+        speed_word = self._resolve_tailing_data67_word(status)
+        voltage_raw = max(0, min(65535, int(round(status.tailing_real_time_voltage_v * 10))))
+
+        frame = [0] * 15
+        frame[0] = 0x08
+        frame[1] = 0x61
+        frame[2] = self._encode_tailing_status1(status)
+        frame[3] = self._encode_tailing_y34f_status2(status)
+        frame[4] = self._encode_tailing_y34f_status3(status)
+        frame[5] = self._encode_tailing_y34f_status4(status)
+        frame[6] = self._encode_signed_current(status.current_a)
+        frame[7] = (speed_word >> 8) & 0xFF
+        frame[8] = speed_word & 0xFF
+        frame[9] = self._encode_yige_soc(status)
+        frame[10] = self._encode_voltage_mask(status)
+        frame[11] = self._encode_tailing_y34f_status11(status)
+        frame[12] = (voltage_raw >> 8) & 0xFF
+        frame[13] = voltage_raw & 0xFF
+        frame[14] = self._xor_checksum(frame[:14])
+        return True, frame, ""
+
     def _generate_yadea_frame(self, status: StatusBits) -> Tuple[bool, List[int], str]:
         is_valid, error_msg = self.validate_status_bits(status)
         if not is_valid:
@@ -681,6 +819,34 @@ class ProtocolHandler:
         frame[8] = hall_count & 0xFF
         frame[9] = status.soc_percent & 0xFF
         frame[10] = status.current_percentage & 0xFF
+        frame[11] = self._xor_checksum(frame[:11])
+        return True, frame, ""
+
+    def _generate_jingxian_frame(
+        self, status: StatusBits, preview: bool
+    ) -> Tuple[bool, List[int], str]:
+        is_valid, error_msg = self.validate_status_bits(status)
+        if not is_valid:
+            return False, [], error_msg
+
+        sequence = (
+            self.get_current_jingxian_sequence() if preview else self.get_next_jingxian_sequence()
+        )
+        plus_code = self.jingxian_pluscode_encrypt(sequence & 0xFF)
+        hall_count = self._resolve_hall_count(status)
+
+        frame = [0] * 12
+        frame[0] = 0x07
+        frame[1] = sequence & 0xFF
+        frame[2] = self._encode_jingxian_status1(status)
+        frame[3] = (self._encode_generic_status2(status, include_walk_mode=True) + plus_code) & 0xFF
+        frame[4] = (self._encode_generic_status3(status, PROTOCOL_JINGXIAN) + plus_code) & 0xFF
+        frame[5] = (self._encode_generic_status4(status, PROTOCOL_JINGXIAN) + plus_code) & 0xFF
+        frame[6] = self._encode_signed_current(status.current_a)
+        frame[7] = (((hall_count >> 8) & 0xFF) + plus_code) & 0xFF
+        frame[8] = ((hall_count & 0xFF) + plus_code) & 0xFF
+        frame[9] = ((status.voltage_percentage & 0xFF) + plus_code) & 0xFF
+        frame[10] = ((status.current_percentage & 0xFF) + plus_code) & 0xFF
         frame[11] = self._xor_checksum(frame[:11])
         return True, frame, ""
 
@@ -824,6 +990,16 @@ class ProtocolHandler:
             value |= 0x02
         return value
 
+    def _encode_tailing_status1(self, status: StatusBits) -> int:
+        value = 0
+        if status.side_stand:
+            value |= 0x08
+        if status.p_gear_protect:
+            value |= 0x02
+        if status.tailing_national_standard:
+            value |= 0x01
+        return value
+
     def _encode_yadea_status1(self, status: StatusBits) -> int:
         value = 0
         if status.side_stand:
@@ -838,6 +1014,14 @@ class ProtocolHandler:
             value |= 0x08
         if status.side_stand:
             value |= 0x04
+        return value
+
+    def _encode_jingxian_status1(self, status: StatusBits) -> int:
+        value = 0
+        if status.side_stand:
+            value |= 0x08
+        if status.p_gear_protect:
+            value |= 0x02
         return value
 
     def _encode_dongwei_status1(self, status: StatusBits) -> int:
@@ -917,7 +1101,7 @@ class ProtocolHandler:
 
     def _encode_generic_status3(self, status: StatusBits, protocol_name: str) -> int:
         value = 0
-        if protocol_name in {PROTOCOL_YADEA, PROTOCOL_DONGWEI_GTXH}:
+        if protocol_name in {PROTOCOL_YADEA, PROTOCOL_JINGXIAN, PROTOCOL_DONGWEI_GTXH}:
             if status.speed_mode & 0x04:
                 value |= 0x80
         elif status.gear_four:
@@ -941,7 +1125,12 @@ class ProtocolHandler:
         if protocol_name in {PROTOCOL_WUXI_YIGE, PROTOCOL_FZ_SIF}:
             if status.cloud_power_mode:
                 value |= 0x80
-        elif protocol_name in {PROTOCOL_RUILUN, PROTOCOL_YOUYIBAO, PROTOCOL_DONGWEI_GTXH}:
+        elif protocol_name in {
+            PROTOCOL_RUILUN,
+            PROTOCOL_YOUYIBAO,
+            PROTOCOL_JINGXIAN,
+            PROTOCOL_DONGWEI_GTXH,
+        }:
             if status.current_70_flag:
                 value |= 0x80
 
@@ -962,6 +1151,99 @@ class ProtocolHandler:
             value |= 0x02
         if status.speed_limit:
             value |= 0x01
+        return value
+
+    def _encode_tailing_y34b_status4(self, status: StatusBits) -> int:
+        value = 0
+        if status.cloud_power_mode:
+            value |= 0x80
+        if status.tailing_actual_speed_mode:
+            value |= 0x40
+        if status.ekk_enable:
+            value |= 0x20
+        if status.over_current:
+            value |= 0x10
+        if status.stall_protect:
+            value |= 0x08
+        if status.reverse:
+            value |= 0x04
+        if status.electronic_brake:
+            value |= 0x02
+        return value
+
+    def _encode_tailing_y34f_status2(self, status: StatusBits) -> int:
+        value = 0
+        if status.walk_mode:
+            value |= 0x80
+        if status.hall_fault:
+            value |= 0x40
+        if status.throttle_fault:
+            value |= 0x20
+        if status.controller_fault:
+            value |= 0x10
+        if status.under_voltage:
+            value |= 0x08
+        if status.cruise:
+            value |= 0x04
+        if status.tailing_tire_pressure_low:
+            value |= 0x02
+        return value
+
+    def _encode_tailing_y34f_status3(self, status: StatusBits) -> int:
+        value = 0
+        if status.gear_four:
+            value |= 0x80
+        if status.tailing_tcs_indicator:
+            value |= 0x40
+        if status.brake:
+            value |= 0x20
+        if status.tailing_hdc_indicator:
+            value |= 0x10
+        if status.regen_charging:
+            value |= 0x08
+        value |= status.speed_mode & 0x03
+        return value
+
+    def _encode_tailing_y34f_status4(self, status: StatusBits) -> int:
+        value = 0
+        if status.cloud_power_mode:
+            value |= 0x80
+        if status.tailing_actual_speed_mode:
+            value |= 0x40
+        if status.tailing_dual_undervoltage:
+            value |= 0x20
+        if status.over_current:
+            value |= 0x10
+        if status.stall_protect:
+            value |= 0x08
+        if status.reverse:
+            value |= 0x04
+        value |= status.tailing_seat_state & 0x03
+        return value
+
+    def _encode_tailing_status11(self, status: StatusBits) -> int:
+        value = 0
+        if status.tailing_dual_soc:
+            value |= 0x08
+        if status.tailing_display_sleep:
+            value |= 0x04
+        if status.tailing_speed_15kmh_warning:
+            value |= 0x02
+        if status.tailing_brake_fault:
+            value |= 0x01
+        return value
+
+    def _encode_tailing_y34f_status11(self, status: StatusBits) -> int:
+        value = 0
+        if status.tailing_display_voltage_from_data:
+            value |= 0x80
+        if status.tailing_battery_over_temp:
+            value |= 0x40
+        if status.tailing_battery_over_current:
+            value |= 0x20
+        if status.tailing_battery_over_voltage:
+            value |= 0x10
+        value |= self._encode_tailing_status11(status)
         return value
 
     def _encode_ruilun_soc(self, status: StatusBits) -> int:
@@ -1102,6 +1384,11 @@ class ProtocolHandler:
             return status.hall_count & 0xFFFF
         return max(0, min(65535, int(round(status.speed_kmh * 10))))
 
+    def _resolve_tailing_data67_word(self, status: StatusBits) -> int:
+        if status.tailing_actual_speed_mode:
+            return max(0, min(65535, int(round(status.speed_kmh * 10))))
+        return self._resolve_hall_count(status)
+
     def _xor_checksum(self, payload: List[int]) -> int:
         checksum = 0
         for value in payload:
@@ -1205,6 +1492,38 @@ class ProtocolHandler:
                 "Status9 协议切换电压",
                 "校验和 (XOR)",
             ],
+            PROTOCOL_TAILING_Y34B: [
+                "设备编码 (固定 0x08)",
+                "流水号 (固定 0x61)",
+                "DATA2 侧撑/P档/国标轻摩状态",
+                "DATA3 推行/故障/巡航/助力/缺相",
+                "DATA4 四档/运行/刹车/保护/滑充/三速",
+                "DATA5 云动力/速度协议/EKK/保护",
+                "DATA6 运行电流",
+                "DATA7 速度高字节/实际车速高字节",
+                "DATA8 速度低字节/实际车速低字节",
+                "DATA9 锂电 SOC/铅酸模式",
+                "DATA10 控制器额定工作电压",
+                "DATA11 双显SOC/休眠/15kmh预警/刹车故障",
+                "DATA12 校验和 (XOR)",
+            ],
+            PROTOCOL_TAILING_Y34F: [
+                "设备编码 (固定 0x08)",
+                "流水号 (固定 0x61)",
+                "DATA2 侧撑/P档/国标轻摩状态",
+                "DATA3 推车/故障/巡航/胎压信号",
+                "DATA4 四档/TCS/刹车/HDC/滑充/三速",
+                "DATA5 云动力/速度协议/双欠压/坐垫功能",
+                "DATA6 运行电流",
+                "DATA7 速度高字节/实际车速高字节",
+                "DATA8 速度低字节/实际车速低字节",
+                "DATA9 锂电 SOC/铅酸模式",
+                "DATA10 控制器额定工作电压",
+                "DATA11 电压采集/团标电池故障/扩展状态",
+                "DATA12 实时电压高字节 (*10)",
+                "DATA13 实时电压低字节 (*10)",
+                "DATA14 校验和 (XOR)",
+            ],
             PROTOCOL_YADEA: [
                 "设备编码 (固定 0x08)",
                 "流水号 (固定 0x61)",
@@ -1231,6 +1550,20 @@ class ProtocolHandler:
                 "Status7 霍尔计数低字节",
                 "Status8 电压/电量百分比",
                 "Status9 电流百分比",
+                "校验和 (XOR)",
+            ],
+            PROTOCOL_JINGXIAN: [
+                "设备编码 (固定 0x07)",
+                "流水号 SEQ_CODE (自动递增)",
+                "Status1 (不加密，含 P档信息)",
+                "Status2 + PlusCod",
+                "Status3 + PlusCod",
+                "Status4 + PlusCod",
+                "电流值 (不加密)",
+                "霍尔速度高字节 + PlusCod",
+                "霍尔速度低字节 + PlusCod",
+                "电压比例 + PlusCod",
+                "电流比例 + PlusCod",
                 "校验和 (XOR)",
             ],
             PROTOCOL_DONGWEI_GTXH: [
@@ -1533,6 +1866,109 @@ class PresetScenarios:
         return status
 
     @staticmethod
+    def tailing_y34b_normal_running() -> StatusBits:
+        status = StatusBits(protocol_name=PROTOCOL_TAILING_Y34B)
+        status.voltage_48v = True
+        status.hall_count = 3000
+        status.soc_percent = 78
+        status.lithium_soc_mode = True
+        status.motor_running = True
+        status.current_a = 10
+        status.tailing_national_standard = True
+        return status
+
+    @staticmethod
+    def tailing_y34b_energy_recovery() -> StatusBits:
+        status = StatusBits(protocol_name=PROTOCOL_TAILING_Y34B)
+        status.voltage_60v = True
+        status.voltage_48v = False
+        status.soc_percent = 66
+        status.lithium_soc_mode = True
+        status.regen_charging = True
+        status.cloud_power_mode = True
+        status.tailing_actual_speed_mode = True
+        status.speed_kmh = 28.6
+        status.current_a = -2
+        status.tailing_national_standard = True
+        return status
+
+    @staticmethod
+    def tailing_y34b_fault_scenario() -> StatusBits:
+        status = StatusBits(protocol_name=PROTOCOL_TAILING_Y34B)
+        status.voltage_72v = True
+        status.voltage_48v = False
+        status.hall_count = 0
+        status.walk_mode = True
+        status.hall_fault = True
+        status.controller_fault = True
+        status.under_voltage = True
+        status.side_stand = True
+        status.p_gear_protect = True
+        status.tailing_display_sleep = True
+        status.tailing_speed_15kmh_warning = True
+        status.tailing_brake_fault = True
+        return status
+
+    @staticmethod
+    def tailing_y34f_normal_running() -> StatusBits:
+        status = StatusBits(protocol_name=PROTOCOL_TAILING_Y34F)
+        status.voltage_48v = True
+        status.hall_count = 3200
+        status.soc_percent = 80
+        status.lithium_soc_mode = True
+        status.current_a = 11
+        status.speed_mode = 2
+        status.tailing_national_standard = True
+        status.tailing_real_time_voltage_v = 54.6
+        return status
+
+    @staticmethod
+    def tailing_y34f_energy_recovery() -> StatusBits:
+        status = StatusBits(protocol_name=PROTOCOL_TAILING_Y34F)
+        status.voltage_60v = True
+        status.voltage_48v = False
+        status.soc_percent = 64
+        status.lithium_soc_mode = True
+        status.regen_charging = True
+        status.cloud_power_mode = True
+        status.tailing_actual_speed_mode = True
+        status.speed_kmh = 32.4
+        status.current_a = -3
+        status.speed_mode = 1
+        status.tailing_national_standard = True
+        status.tailing_tcs_indicator = True
+        status.tailing_real_time_voltage_v = 61.2
+        return status
+
+    @staticmethod
+    def tailing_y34f_fault_scenario() -> StatusBits:
+        status = StatusBits(protocol_name=PROTOCOL_TAILING_Y34F)
+        status.voltage_72v = True
+        status.voltage_48v = False
+        status.walk_mode = True
+        status.hall_fault = True
+        status.controller_fault = True
+        status.under_voltage = True
+        status.side_stand = True
+        status.p_gear_protect = True
+        status.brake = True
+        status.tailing_tire_pressure_low = True
+        status.tailing_tcs_indicator = True
+        status.tailing_hdc_indicator = True
+        status.tailing_dual_undervoltage = True
+        status.tailing_seat_state = 0x01
+        status.tailing_display_voltage_from_data = True
+        status.tailing_battery_over_temp = True
+        status.tailing_battery_over_current = True
+        status.tailing_battery_over_voltage = True
+        status.tailing_dual_soc = True
+        status.tailing_display_sleep = True
+        status.tailing_speed_15kmh_warning = True
+        status.tailing_brake_fault = True
+        status.tailing_real_time_voltage_v = 65.8
+        return status
+
+    @staticmethod
     def yadea_normal_running() -> StatusBits:
         status = StatusBits(protocol_name=PROTOCOL_YADEA)
         status.hall_count = 3200
@@ -1600,6 +2036,41 @@ class PresetScenarios:
         status.under_voltage = True
         status.side_stand = True
         status.p_gear_protect = True
+        return status
+
+    @staticmethod
+    def jingxian_normal_running() -> StatusBits:
+        status = StatusBits(protocol_name=PROTOCOL_JINGXIAN)
+        status.hall_count = 3200
+        status.voltage_percentage = 80
+        status.current_percentage = 55
+        status.motor_running = True
+        status.speed_mode = 3
+        status.current_a = 12
+        return status
+
+    @staticmethod
+    def jingxian_energy_recovery() -> StatusBits:
+        status = StatusBits(protocol_name=PROTOCOL_JINGXIAN)
+        status.hall_count = 2600
+        status.voltage_percentage = 62
+        status.current_percentage = 25
+        status.regen_charging = True
+        status.current_a = -2
+        status.speed_mode = 2
+        return status
+
+    @staticmethod
+    def jingxian_fault_scenario() -> StatusBits:
+        status = StatusBits(protocol_name=PROTOCOL_JINGXIAN)
+        status.hall_count = 0
+        status.voltage_percentage = 18
+        status.current_percentage = 0
+        status.walk_mode = True
+        status.hall_fault = True
+        status.controller_fault = True
+        status.under_voltage = True
+        status.speed_limit = True
         return status
 
     @staticmethod

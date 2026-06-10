@@ -18,6 +18,7 @@ from PyQt5.QtCore import QObject, QTimer, pyqtSignal
 SEND_MODE_UART = "uart"
 SEND_MODE_BATTERY_SINGLE_WIRE = "battery_single_wire"
 SEND_MODE_LUYUAN_BMS_SIF = "luyuan_bms_sif"
+SEND_MODE_JINGXIAN_SIF = "jingxian_sif"
 
 
 @dataclass
@@ -48,7 +49,7 @@ class SerialManager(QObject):
         self.cyclic_frame_sequence: List[List[int]] = []
         self.cyclic_frame_index = 0
         self.cyclic_send_mode = SEND_MODE_UART
-        self.send_interval_ms = 1000
+        self.send_interval_ms = 500
         self.tosc_us = 100
 
         self.send_count = 0
@@ -131,6 +132,8 @@ class SerialManager(QObject):
             return self._send_battery_single_wire_frame(frame_data, skip_ui_update)
         if send_mode == SEND_MODE_LUYUAN_BMS_SIF:
             return self._send_luyuan_bms_sif_frame(frame_data, skip_ui_update)
+        if send_mode == SEND_MODE_JINGXIAN_SIF:
+            return self._send_jingxian_sif_frame(frame_data, skip_ui_update)
         if send_mode != SEND_MODE_UART:
             return False, f"不支持的发送模式: {send_mode}"
 
@@ -203,16 +206,41 @@ class SerialManager(QObject):
             skip_ui_update=skip_ui_update,
         )
 
+    def _send_jingxian_sif_frame(
+        self, frame_data: List[int], skip_ui_update: bool = False
+    ) -> Tuple[bool, str]:
+        if len(frame_data) != 12:
+            return False, "精显一线通协议帧长度必须为 12 字节"
+
+        return self._send_sif_frame(
+            frame_data,
+            bit_indices=range(8),
+            sync_low_ms=50,
+            sync_high_ms=1,
+            stop_low_ms=0,
+            release_after_stop=False,
+            protocol_label="精显一线通协议",
+            skip_ui_update=skip_ui_update,
+            zero_low_ms=1,
+            zero_high_ms=0.5,
+            one_low_ms=0.5,
+            one_high_ms=1,
+        )
+
     def _send_sif_frame(
         self,
         frame_data: List[int],
         bit_indices,
-        sync_low_ms: int,
-        sync_high_ms: int,
-        stop_low_ms: int,
+        sync_low_ms: float,
+        sync_high_ms: float,
+        stop_low_ms: float,
         release_after_stop: bool,
         protocol_label: str,
         skip_ui_update: bool = False,
+        zero_low_ms: float = 4,
+        zero_high_ms: float = 2,
+        one_low_ms: float = 2,
+        one_high_ms: float = 4,
     ) -> Tuple[bool, str]:
         self._begin_precise_timing()
         try:
@@ -224,8 +252,8 @@ class SerialManager(QObject):
             for byte_value in frame_data:
                 for bit_index in bit_indices:
                     bit_value = (byte_value >> bit_index) & 0x01
-                    low_ms = 2 if bit_value else 4
-                    high_ms = 4 if bit_value else 2
+                    low_ms = one_low_ms if bit_value else zero_low_ms
+                    high_ms = one_high_ms if bit_value else zero_high_ms
                     self._set_tx_low(True)
                     self._sleep_ms(low_ms)
                     self._set_tx_low(False)
@@ -265,7 +293,7 @@ class SerialManager(QObject):
         except Exception:
             pass
 
-    def _sleep_ms(self, duration_ms: int):
+    def _sleep_ms(self, duration_ms: float):
         if duration_ms <= 0:
             return
 
@@ -287,7 +315,7 @@ class SerialManager(QObject):
     def start_cyclic_send(
         self,
         frame_data: List[int],
-        interval_ms: int = 1000,
+        interval_ms: int = 500,
         send_mode: str = SEND_MODE_UART,
     ) -> Tuple[bool, str]:
         return self.start_cyclic_send_sequence([frame_data], interval_ms, send_mode)
@@ -295,7 +323,7 @@ class SerialManager(QObject):
     def start_cyclic_send_sequence(
         self,
         frame_sequence: List[List[int]],
-        interval_ms: int = 1000,
+        interval_ms: int = 500,
         send_mode: str = SEND_MODE_UART,
     ) -> Tuple[bool, str]:
         if not self.is_connected:
@@ -306,6 +334,7 @@ class SerialManager(QObject):
             SEND_MODE_UART,
             SEND_MODE_BATTERY_SINGLE_WIRE,
             SEND_MODE_LUYUAN_BMS_SIF,
+            SEND_MODE_JINGXIAN_SIF,
         }:
             return False, f"不支持的发送模式: {send_mode}"
 
@@ -328,6 +357,20 @@ class SerialManager(QObject):
         self.send_interval_ms = interval_ms
         self.send_count = 0
 
+        self.send_timer.start(interval_ms)
+        return True, ""
+
+    def update_cyclic_send_interval(self, interval_ms: int) -> Tuple[bool, str]:
+        if not self.is_cyclic_sending():
+            return False, "当前没有正在运行的循环发送"
+
+        if self.cyclic_send_mode == SEND_MODE_BATTERY_SINGLE_WIRE:
+            if not (1000 <= interval_ms <= 2000):
+                return False, "电池单线通讯协议发送间隔必须在1000ms-2000ms范围内"
+        elif not (500 <= interval_ms <= 5000):
+            return False, "发送间隔必须在500ms-5000ms范围内"
+
+        self.send_interval_ms = interval_ms
         self.send_timer.start(interval_ms)
         return True, ""
 

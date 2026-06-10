@@ -26,9 +26,12 @@ from protocol.protocol_handler import (
     PROTOCOL_DONGWEI_GTXH,
     PROTOCOL_FZ_SIF,
     PROTOCOL_HANGZHOU_ANXIAN,
+    PROTOCOL_JINGXIAN,
     PROTOCOL_LITHIUM_BMS,
     PROTOCOL_LUYUAN_BMS,
     PROTOCOL_RUILUN,
+    PROTOCOL_TAILING_Y34B,
+    PROTOCOL_TAILING_Y34F,
     PROTOCOL_WUXI_YIGE,
     PROTOCOL_XINCHI,
     PROTOCOL_XINRI,
@@ -374,8 +377,11 @@ class MainWindow(QMainWindow):
                 PROTOCOL_HANGZHOU_ANXIAN,
                 PROTOCOL_CHANGZHOU_XINSIWEI,
                 PROTOCOL_WUXI_YIGE,
+                PROTOCOL_TAILING_Y34B,
+                PROTOCOL_TAILING_Y34F,
                 PROTOCOL_YADEA,
                 PROTOCOL_YOUYIBAO,
+                PROTOCOL_JINGXIAN,
                 PROTOCOL_DONGWEI_GTXH,
                 PROTOCOL_XINCHI,
                 PROTOCOL_LUYUAN_BMS,
@@ -511,6 +517,13 @@ class MainWindow(QMainWindow):
                 ("驻车指示(P档) (D1)", True),
                 ("备用 (D0)", False),
             ]
+        elif protocol in {PROTOCOL_TAILING_Y34B, PROTOCOL_TAILING_Y34F}:
+            labels = [
+                ("侧撑指示 (D3)", True),
+                ("备用 (D2)", False),
+                ("驻车指示(P档) (D1)", True),
+                ("国标状态 (D0) - 1=国标/0=轻摩", True),
+            ]
         elif protocol == PROTOCOL_YADEA:
             labels = [
                 ("单撑断电检测 (D3)", True),
@@ -523,6 +536,13 @@ class MainWindow(QMainWindow):
                 ("P档驻车 (D3)", True),
                 ("侧撑标志 (D2)", True),
                 ("备用 (D1)", False),
+                ("备用 (D0)", False),
+            ]
+        elif protocol == PROTOCOL_JINGXIAN:
+            labels = [
+                ("侧撑标志 (D3)", True),
+                ("备用 (D2)", False),
+                ("P档驻车 (D1)", True),
                 ("备用 (D0)", False),
             ]
         else:
@@ -564,8 +584,17 @@ class MainWindow(QMainWindow):
         widget = QWidget()
         layout = QGridLayout(widget)
         
-        status2_d7_enabled = self.current_protocol in {PROTOCOL_WUXI_YIGE, PROTOCOL_FZ_SIF}
-        status2_d7_text = "6KM推行/推车标志 (D7)" if status2_d7_enabled else "备用 (D7)"
+        status2_d7_enabled = self.current_protocol in {
+            PROTOCOL_WUXI_YIGE,
+            PROTOCOL_TAILING_Y34B,
+            PROTOCOL_TAILING_Y34F,
+            PROTOCOL_FZ_SIF,
+            PROTOCOL_JINGXIAN,
+        }
+        if self.current_protocol == PROTOCOL_JINGXIAN:
+            status2_d7_text = "6km巡航中 (D7)"
+        else:
+            status2_d7_text = "6KM推行/推车标志 (D7)" if status2_d7_enabled else "备用 (D7)"
         self.status2_d7_cb = QCheckBox(status2_d7_text)
         self.status2_d7_cb.setEnabled(status2_d7_enabled)
         layout.addWidget(self.status2_d7_cb, 0, 0)
@@ -601,14 +630,25 @@ class MainWindow(QMainWindow):
             1,
         )
         
-        self.assist_cb = QCheckBox("助力 (D1)")
+        assist_text = (
+            "胎压信号 (D1) - 1=胎压不足/0=正常"
+            if self.current_protocol == PROTOCOL_TAILING_Y34F
+            else "助力 (D1)"
+        )
+        self.assist_cb = QCheckBox(assist_text)
         layout.addWidget(
             self.assist_cb,
             1 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 3,
             2 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 0,
         )
         
-        self.motor_phase_loss_cb = QCheckBox("电机缺相 (D0)")
+        motor_phase_text = (
+            "备用 (D0)"
+            if self.current_protocol == PROTOCOL_TAILING_Y34F
+            else "电机缺相 (D0)"
+        )
+        self.motor_phase_loss_cb = QCheckBox(motor_phase_text)
+        self.motor_phase_loss_cb.setEnabled(self.current_protocol != PROTOCOL_TAILING_Y34F)
         layout.addWidget(
             self.motor_phase_loss_cb,
             1 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 3,
@@ -629,21 +669,26 @@ class MainWindow(QMainWindow):
 
         d7_text = (
             "速度模式高位 (D7)"
-            if self.current_protocol in {PROTOCOL_YADEA, PROTOCOL_DONGWEI_GTXH}
+            if self.current_protocol in {PROTOCOL_YADEA, PROTOCOL_JINGXIAN, PROTOCOL_DONGWEI_GTXH}
             else "四档指示 (D7)"
         )
         speed_mode_label = (
             "档位模式 (D7+D1~D0):"
             if self.current_protocol == PROTOCOL_DONGWEI_GTXH
             else "速度模式 (D7+D1~D0):"
-            if self.current_protocol == PROTOCOL_YADEA
+            if self.current_protocol in {PROTOCOL_YADEA, PROTOCOL_JINGXIAN}
             else "三速模式 (D1~D0):"
         )
 
         self.gear_four_cb = QCheckBox(d7_text)
         layout.addWidget(self.gear_four_cb, 0, 0)
         
-        self.motor_running_cb = QCheckBox("电机运行状态 (D6) - 1=运行/0=停止")
+        motor_running_text = (
+            "TCS指示 (D6) - 1=显示/0=默认"
+            if self.current_protocol == PROTOCOL_TAILING_Y34F
+            else "电机运行状态 (D6) - 1=运行/0=停止"
+        )
+        self.motor_running_cb = QCheckBox(motor_running_text)
         layout.addWidget(
             self.motor_running_cb,
             0,
@@ -655,7 +700,12 @@ class MainWindow(QMainWindow):
         self.brake_cb = QCheckBox("刹车 (D5)")
         layout.addWidget(self.brake_cb, 1, 0)
         
-        self.controller_protect_cb = QCheckBox("控制器保护 (D4)")
+        controller_protect_text = (
+            "HDC指示 (D4) - 1=显示/0=默认"
+            if self.current_protocol == PROTOCOL_TAILING_Y34F
+            else "控制器保护 (D4)"
+        )
+        self.controller_protect_cb = QCheckBox(controller_protect_text)
         layout.addWidget(self.controller_protect_cb, 1, 1)
         
         self.regen_charging_cb = QCheckBox("滑行充电 (D3) - 1=能量回收")
@@ -667,7 +717,13 @@ class MainWindow(QMainWindow):
             2 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 1,
         )
         
-        self.anti_runaway_cb = QCheckBox("防飞车保护 (D2)")
+        anti_runaway_text = (
+            "备用 (D2)"
+            if self.current_protocol == PROTOCOL_TAILING_Y34F
+            else "防飞车保护 (D2)"
+        )
+        self.anti_runaway_cb = QCheckBox(anti_runaway_text)
+        self.anti_runaway_cb.setEnabled(self.current_protocol != PROTOCOL_TAILING_Y34F)
         layout.addWidget(
             self.anti_runaway_cb,
             2 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 2,
@@ -681,7 +737,10 @@ class MainWindow(QMainWindow):
         )
         self.speed_mode_spin = QSpinBox()
         self.speed_mode_spin.setRange(
-            0, 7 if self.current_protocol in {PROTOCOL_YADEA, PROTOCOL_DONGWEI_GTXH} else 3
+            0,
+            7
+            if self.current_protocol in {PROTOCOL_YADEA, PROTOCOL_JINGXIAN, PROTOCOL_DONGWEI_GTXH}
+            else 3,
         )
         layout.addWidget(
             self.speed_mode_spin,
@@ -701,10 +760,20 @@ class MainWindow(QMainWindow):
             layout.setHorizontalSpacing(18)
             layout.setVerticalSpacing(6)
 
-        if self.current_protocol in {PROTOCOL_WUXI_YIGE, PROTOCOL_FZ_SIF}:
+        if self.current_protocol in {
+            PROTOCOL_WUXI_YIGE,
+            PROTOCOL_TAILING_Y34B,
+            PROTOCOL_TAILING_Y34F,
+            PROTOCOL_FZ_SIF,
+        }:
             d7_text = "云动力模式(速度提升) (D7)"
             d7_enabled = True
-        elif self.current_protocol in {PROTOCOL_RUILUN, PROTOCOL_DONGWEI_GTXH, PROTOCOL_YOUYIBAO}:
+        elif self.current_protocol in {
+            PROTOCOL_RUILUN,
+            PROTOCOL_DONGWEI_GTXH,
+            PROTOCOL_YOUYIBAO,
+            PROTOCOL_JINGXIAN,
+        }:
             d7_text = "70%电流标志 (D7)"
             d7_enabled = True
         else:
@@ -715,25 +784,48 @@ class MainWindow(QMainWindow):
         self.current_70_flag_cb.setEnabled(d7_enabled)
         layout.addWidget(self.current_70_flag_cb, 0, 0)
         
-        d6_text = "侧撑检测/单撑 (D6)" if self.current_protocol == PROTOCOL_DONGWEI_GTXH else "一键通启用 (D6)"
+        if self.current_protocol in {PROTOCOL_TAILING_Y34B, PROTOCOL_TAILING_Y34F}:
+            d6_text = "速度协议指示位 (D6) - 1=实际车速/0=霍尔计数"
+        else:
+            d6_text = (
+                "侧撑检测/单撑 (D6)"
+                if self.current_protocol == PROTOCOL_DONGWEI_GTXH
+                else "一键通启用 (D6)"
+            )
         self.one_key_enable_cb = QCheckBox(d6_text)
         layout.addWidget(self.one_key_enable_cb, 0, 1)
         
-        self.ekk_enable_cb = QCheckBox("EKK启用 (D5)")
+        if self.current_protocol == PROTOCOL_TAILING_Y34B:
+            ekk_text = "启用EKK备用电源/双欠压 (D5)"
+        elif self.current_protocol == PROTOCOL_TAILING_Y34F:
+            ekk_text = "双欠压指示 (D5)"
+        else:
+            ekk_text = "EKK启用 (D5)"
+        self.ekk_enable_cb = QCheckBox(ekk_text)
         layout.addWidget(
             self.ekk_enable_cb,
             0 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 1,
             2 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 0,
         )
         
-        self.over_current_cb = QCheckBox("过流保护 (D4)")
+        over_current_text = (
+            "过流保护(预留) (D4)"
+            if self.current_protocol == PROTOCOL_TAILING_Y34F
+            else "过流保护 (D4)"
+        )
+        self.over_current_cb = QCheckBox(over_current_text)
         layout.addWidget(
             self.over_current_cb,
             0 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 1,
             3 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 1,
         )
         
-        self.stall_protect_cb = QCheckBox("堵转保护 (D3)")
+        stall_protect_text = (
+            "堵转保护(预留) (D3)"
+            if self.current_protocol == PROTOCOL_TAILING_Y34F
+            else "堵转保护 (D3)"
+        )
+        self.stall_protect_cb = QCheckBox(stall_protect_text)
         layout.addWidget(
             self.stall_protect_cb,
             1 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 2,
@@ -747,14 +839,26 @@ class MainWindow(QMainWindow):
             1,
         )
         
-        self.electronic_brake_cb = QCheckBox("电子刹车 (D1)")
+        electronic_brake_text = (
+            "坐垫功能位 D1 (与 D0 组合)"
+            if self.current_protocol == PROTOCOL_TAILING_Y34F
+            else "电子刹车 (D1)"
+        )
+        self.electronic_brake_cb = QCheckBox(electronic_brake_text)
         layout.addWidget(
             self.electronic_brake_cb,
             1 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 3,
             2 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 0,
         )
         
-        self.speed_limit_cb = QCheckBox("限速 (D0) - 1=限速/0=解除")
+        if self.current_protocol == PROTOCOL_TAILING_Y34F:
+            speed_limit_text = "坐垫功能位 D0 (与 D1 组合)"
+        elif self.current_protocol == PROTOCOL_TAILING_Y34B:
+            speed_limit_text = "备用 (D0)"
+        else:
+            speed_limit_text = "限速 (D0) - 1=限速/0=解除"
+        self.speed_limit_cb = QCheckBox(speed_limit_text)
+        self.speed_limit_cb.setEnabled(self.current_protocol != PROTOCOL_TAILING_Y34B)
         layout.addWidget(
             self.speed_limit_cb,
             1 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 3,
@@ -818,6 +922,8 @@ class MainWindow(QMainWindow):
             status8_text = "电压百分比 (Status8):"
         elif protocol == PROTOCOL_FZ_SIF:
             status8_text = "电池电量/电压比例值 (Status8):"
+        elif protocol == PROTOCOL_JINGXIAN:
+            status8_text = "电压百分比 (Status8):"
         elif protocol == PROTOCOL_YADEA:
             status8_text = "电量百分比 (Status8):"
         elif protocol == PROTOCOL_YOUYIBAO:
@@ -835,7 +941,12 @@ class MainWindow(QMainWindow):
         self.soc_spin.setValue(50)
         status8_layout.addWidget(self.soc_spin)
 
-        if protocol in {PROTOCOL_RUILUN, PROTOCOL_WUXI_YIGE}:
+        if protocol in {
+            PROTOCOL_RUILUN,
+            PROTOCOL_WUXI_YIGE,
+            PROTOCOL_TAILING_Y34B,
+            PROTOCOL_TAILING_Y34F,
+        }:
             self.lithium_soc_mode_cb = QCheckBox(
                 "锂电SOC模式" if protocol == PROTOCOL_RUILUN else "透传锂电SOC(D7=1)"
             )
@@ -852,7 +963,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(status8_layout, 3, 1)
 
         row_index = 4
-        if protocol in {PROTOCOL_YADEA, PROTOCOL_YOUYIBAO, PROTOCOL_DONGWEI_GTXH}:
+        if protocol in {PROTOCOL_YADEA, PROTOCOL_YOUYIBAO, PROTOCOL_JINGXIAN, PROTOCOL_DONGWEI_GTXH}:
             layout.addWidget(QLabel("电流百分比 (Status9):"), row_index, 0)
             self.current_percent_spin = QSpinBox()
             self.current_percent_spin.setRange(0, 100)
@@ -860,7 +971,7 @@ class MainWindow(QMainWindow):
             layout.addWidget(self.current_percent_spin, row_index, 1)
             row_index += 1
 
-        if protocol in {PROTOCOL_YADEA, PROTOCOL_YOUYIBAO}:
+        if protocol in {PROTOCOL_YADEA, PROTOCOL_YOUYIBAO, PROTOCOL_JINGXIAN}:
             return widget
 
         # Status9 - 系统电压
@@ -924,6 +1035,57 @@ class MainWindow(QMainWindow):
         layout.addWidget(voltage_group, row_index, 0, 1, 2)
         
         return widget
+
+    def create_tailing_extended_status_tab(self) -> QWidget:
+        """创建台铃 Y34 协议扩展状态页。"""
+        widget = QWidget()
+        layout = QGridLayout(widget)
+        row = 0
+
+        if self.current_protocol == PROTOCOL_TAILING_Y34F:
+            self.tailing_display_voltage_from_data_cb = QCheckBox(
+                "电压采集路径 DATA12/13 (D7)"
+            )
+            layout.addWidget(self.tailing_display_voltage_from_data_cb, row, 0)
+            self.tailing_battery_over_temp_cb = QCheckBox("团标电池过温 (D6)")
+            layout.addWidget(self.tailing_battery_over_temp_cb, row, 1)
+            row += 1
+
+            self.tailing_battery_over_current_cb = QCheckBox("团标电池过流 (D5)")
+            layout.addWidget(self.tailing_battery_over_current_cb, row, 0)
+            self.tailing_battery_over_voltage_cb = QCheckBox("电池过压 (D4)")
+            layout.addWidget(self.tailing_battery_over_voltage_cb, row, 1)
+            row += 1
+        else:
+            self.tailing_display_voltage_from_data_cb = None
+            self.tailing_battery_over_temp_cb = None
+            self.tailing_battery_over_current_cb = None
+            self.tailing_battery_over_voltage_cb = None
+
+        self.tailing_dual_soc_cb = QCheckBox("双显 SOC 指示位 (D3)")
+        layout.addWidget(self.tailing_dual_soc_cb, row, 0)
+        self.tailing_display_sleep_cb = QCheckBox("仪表休眠/黑屏 (D2)")
+        layout.addWidget(self.tailing_display_sleep_cb, row, 1)
+        row += 1
+
+        self.tailing_speed_15_warning_cb = QCheckBox("15KM/H 超速预警 (D1)")
+        layout.addWidget(self.tailing_speed_15_warning_cb, row, 0)
+        self.tailing_brake_fault_cb = QCheckBox("刹车故障 (D0)")
+        layout.addWidget(self.tailing_brake_fault_cb, row, 1)
+        row += 1
+
+        if self.current_protocol == PROTOCOL_TAILING_Y34F:
+            layout.addWidget(QLabel("实时电压 (V，编码为 *10):"), row, 0)
+            self.tailing_real_time_voltage_spin = QDoubleSpinBox()
+            self.tailing_real_time_voltage_spin.setRange(0.0, 6553.5)
+            self.tailing_real_time_voltage_spin.setDecimals(1)
+            self.tailing_real_time_voltage_spin.setSingleStep(0.1)
+            self.tailing_real_time_voltage_spin.setValue(48.0)
+            layout.addWidget(self.tailing_real_time_voltage_spin, row, 1)
+        else:
+            self.tailing_real_time_voltage_spin = None
+
+        return widget
     
     def create_send_control_group(self) -> QGroupBox:
         """创建发送控制组"""
@@ -934,7 +1096,8 @@ class MainWindow(QMainWindow):
         layout.addWidget(QLabel("发送间隔 (ms):"), 0, 0)
         self.interval_spin = QSpinBox()
         self.interval_spin.setRange(500, 5000)
-        self.interval_spin.setValue(1000)
+        self.interval_spin.setValue(500)
+        self.interval_spin.valueChanged.connect(self.on_interval_changed)
         layout.addWidget(self.interval_spin, 0, 1)
         
         # 发送按钮
@@ -1090,6 +1253,24 @@ class MainWindow(QMainWindow):
             self.current_percent_spin.valueChanged.connect(self.update_current_frame_display)
         if getattr(self, "voltage_group", None) is not None:
             self.voltage_group.buttonClicked.connect(self.update_current_frame_display)
+        if getattr(self, "tailing_display_voltage_from_data_cb", None) is not None:
+            self.tailing_display_voltage_from_data_cb.toggled.connect(self.update_current_frame_display)
+        if getattr(self, "tailing_battery_over_temp_cb", None) is not None:
+            self.tailing_battery_over_temp_cb.toggled.connect(self.update_current_frame_display)
+        if getattr(self, "tailing_battery_over_current_cb", None) is not None:
+            self.tailing_battery_over_current_cb.toggled.connect(self.update_current_frame_display)
+        if getattr(self, "tailing_battery_over_voltage_cb", None) is not None:
+            self.tailing_battery_over_voltage_cb.toggled.connect(self.update_current_frame_display)
+        if getattr(self, "tailing_dual_soc_cb", None) is not None:
+            self.tailing_dual_soc_cb.toggled.connect(self.update_current_frame_display)
+        if getattr(self, "tailing_display_sleep_cb", None) is not None:
+            self.tailing_display_sleep_cb.toggled.connect(self.update_current_frame_display)
+        if getattr(self, "tailing_speed_15_warning_cb", None) is not None:
+            self.tailing_speed_15_warning_cb.toggled.connect(self.update_current_frame_display)
+        if getattr(self, "tailing_brake_fault_cb", None) is not None:
+            self.tailing_brake_fault_cb.toggled.connect(self.update_current_frame_display)
+        if getattr(self, "tailing_real_time_voltage_spin", None) is not None:
+            self.tailing_real_time_voltage_spin.valueChanged.connect(self.update_current_frame_display)
     
     def load_settings(self):
         """加载设置"""
@@ -1223,10 +1404,16 @@ class MainWindow(QMainWindow):
             self.switch_to_changzhou_xinsiwei_protocol()
         elif protocol_name == PROTOCOL_WUXI_YIGE:
             self.switch_to_wuxi_yige_protocol()
+        elif protocol_name == PROTOCOL_TAILING_Y34B:
+            self.switch_to_tailing_y34b_protocol()
+        elif protocol_name == PROTOCOL_TAILING_Y34F:
+            self.switch_to_tailing_y34f_protocol()
         elif protocol_name == PROTOCOL_YADEA:
             self.switch_to_yadea_protocol()
         elif protocol_name == PROTOCOL_YOUYIBAO:
             self.switch_to_youyibao_protocol()
+        elif protocol_name == PROTOCOL_JINGXIAN:
+            self.switch_to_jingxian_protocol()
         elif protocol_name == PROTOCOL_DONGWEI_GTXH:
             self.switch_to_dongwei_gtxh_protocol()
         elif protocol_name == PROTOCOL_XINCHI:
@@ -1303,6 +1490,20 @@ class MainWindow(QMainWindow):
         self.normal_radio.setChecked(True)
         self.on_scenario_changed()
 
+    def switch_to_tailing_y34b_protocol(self):
+        """切换到无锡台铃 Y34B 协议"""
+        self.current_status = PresetScenarios.tailing_y34b_normal_running()
+        self.show_ruilun_status_config()
+        self.normal_radio.setChecked(True)
+        self.on_scenario_changed()
+
+    def switch_to_tailing_y34f_protocol(self):
+        """切换到无锡台铃 Y34F 协议"""
+        self.current_status = PresetScenarios.tailing_y34f_normal_running()
+        self.show_ruilun_status_config()
+        self.normal_radio.setChecked(True)
+        self.on_scenario_changed()
+
     def switch_to_yadea_protocol(self):
         """切换到雅迪协议"""
         self.current_status = PresetScenarios.yadea_normal_running()
@@ -1313,6 +1514,13 @@ class MainWindow(QMainWindow):
     def switch_to_youyibao_protocol(self):
         """切换到优仪宝一线通协议"""
         self.current_status = PresetScenarios.youyibao_normal_running()
+        self.show_ruilun_status_config()
+        self.normal_radio.setChecked(True)
+        self.on_scenario_changed()
+
+    def switch_to_jingxian_protocol(self):
+        """切换到精显一线通协议"""
+        self.current_status = PresetScenarios.jingxian_normal_running()
         self.show_ruilun_status_config()
         self.normal_radio.setChecked(True)
         self.on_scenario_changed()
@@ -1362,13 +1570,47 @@ class MainWindow(QMainWindow):
             self.interval_spin.setValue(2000)
             return
 
+        if self.current_protocol == PROTOCOL_XINCHI:
+            self.interval_spin.setRange(500, 5000)
+            self.interval_spin.setValue(500)
+            return
+
         current_value = self.interval_spin.value()
         self.interval_spin.setRange(500, 5000)
         if not (500 <= current_value <= 5000):
-            self.interval_spin.setValue(1000)
+            self.interval_spin.setValue(500)
+
+    @pyqtSlot(int)
+    def on_interval_changed(self, interval_ms):
+        if not self.serial_manager.is_cyclic_sending():
+            return
+
+        success, error_msg = self.serial_manager.update_cyclic_send_interval(interval_ms)
+        if not success:
+            self.status_bar.showMessage(error_msg, 3000)
+            return
+
+        if self.active_send_mode == "sequence":
+            self.send_status.setText(f"包组循环发送中... ({interval_ms} ms)")
+        elif self.active_send_mode == "single":
+            self.send_status.setText(f"循环发送中... ({interval_ms} ms)")
 
     def show_ruilun_status_config(self):
         """显示瑞轮协议Status配置界面"""
+        for attr_name in (
+            "tailing_display_voltage_from_data_cb",
+            "tailing_battery_over_temp_cb",
+            "tailing_battery_over_current_cb",
+            "tailing_battery_over_voltage_cb",
+            "tailing_dual_soc_cb",
+            "tailing_display_sleep_cb",
+            "tailing_speed_15_warning_cb",
+            "tailing_brake_fault_cb",
+            "tailing_real_time_voltage_spin",
+        ):
+            if hasattr(self, attr_name):
+                delattr(self, attr_name)
+
         # 清除现有标签页
         self.status_tabs.clear()
         
@@ -1387,6 +1629,8 @@ class MainWindow(QMainWindow):
         
         status5_9_tab = self.create_ruilun_status5_9_tab()
         self.status_tabs.addTab(status5_9_tab, "Status5-9")
+        if self.current_protocol in {PROTOCOL_TAILING_Y34B, PROTOCOL_TAILING_Y34F}:
+            self.status_tabs.addTab(self.create_tailing_extended_status_tab(), "扩展状态")
         self._compact_status_tab_pages()
         
         # 重新连接信号
@@ -2336,10 +2580,16 @@ class MainWindow(QMainWindow):
                 self.load_changzhou_xinsiwei_preset_scenario(scenario_id)
             elif self.current_protocol == PROTOCOL_WUXI_YIGE:
                 self.load_wuxi_yige_preset_scenario(scenario_id)
+            elif self.current_protocol == PROTOCOL_TAILING_Y34B:
+                self.load_tailing_y34b_preset_scenario(scenario_id)
+            elif self.current_protocol == PROTOCOL_TAILING_Y34F:
+                self.load_tailing_y34f_preset_scenario(scenario_id)
             elif self.current_protocol == PROTOCOL_YADEA:
                 self.load_yadea_preset_scenario(scenario_id)
             elif self.current_protocol == PROTOCOL_YOUYIBAO:
                 self.load_youyibao_preset_scenario(scenario_id)
+            elif self.current_protocol == PROTOCOL_JINGXIAN:
+                self.load_jingxian_preset_scenario(scenario_id)
             elif self.current_protocol == PROTOCOL_DONGWEI_GTXH:
                 self.load_dongwei_gtxh_preset_scenario(scenario_id)
             elif self.current_protocol == PROTOCOL_XINCHI:
@@ -2424,6 +2674,32 @@ class MainWindow(QMainWindow):
 
         self.update_ruilun_ui_from_status()
 
+    def load_tailing_y34b_preset_scenario(self, scenario_id):
+        """加载无锡台铃 Y34B 协议预设场景"""
+        if scenario_id == 0:
+            self.current_status = PresetScenarios.tailing_y34b_normal_running()
+        elif scenario_id == 1:
+            self.current_status = PresetScenarios.tailing_y34b_energy_recovery()
+        elif scenario_id == 2:
+            self.current_status = PresetScenarios.tailing_y34b_fault_scenario()
+        else:
+            self.current_status = StatusBits(protocol_name=PROTOCOL_TAILING_Y34B)
+
+        self.update_ruilun_ui_from_status()
+
+    def load_tailing_y34f_preset_scenario(self, scenario_id):
+        """加载无锡台铃 Y34F 协议预设场景"""
+        if scenario_id == 0:
+            self.current_status = PresetScenarios.tailing_y34f_normal_running()
+        elif scenario_id == 1:
+            self.current_status = PresetScenarios.tailing_y34f_energy_recovery()
+        elif scenario_id == 2:
+            self.current_status = PresetScenarios.tailing_y34f_fault_scenario()
+        else:
+            self.current_status = StatusBits(protocol_name=PROTOCOL_TAILING_Y34F)
+
+        self.update_ruilun_ui_from_status()
+
     def load_yadea_preset_scenario(self, scenario_id):
         """加载雅迪协议预设场景"""
         if scenario_id == 0:
@@ -2447,6 +2723,19 @@ class MainWindow(QMainWindow):
             self.current_status = PresetScenarios.youyibao_fault_scenario()
         else:
             self.current_status = StatusBits(protocol_name=PROTOCOL_YOUYIBAO)
+
+        self.update_ruilun_ui_from_status()
+
+    def load_jingxian_preset_scenario(self, scenario_id):
+        """加载精显一线通协议预设场景"""
+        if scenario_id == 0:
+            self.current_status = PresetScenarios.jingxian_normal_running()
+        elif scenario_id == 1:
+            self.current_status = PresetScenarios.jingxian_energy_recovery()
+        elif scenario_id == 2:
+            self.current_status = PresetScenarios.jingxian_fault_scenario()
+        else:
+            self.current_status = StatusBits(protocol_name=PROTOCOL_JINGXIAN)
 
         self.update_ruilun_ui_from_status()
 
@@ -2640,11 +2929,16 @@ class MainWindow(QMainWindow):
             self.speed_alarm_cb.setChecked(False)
             self.p_gear_protect_cb.setChecked(getattr(status, "p_gear_protect", False))
             self.tcs_status_cb.setChecked(False)
-        elif self.current_protocol == PROTOCOL_WUXI_YIGE:
+        elif self.current_protocol in {PROTOCOL_WUXI_YIGE, PROTOCOL_JINGXIAN}:
             self.distance_mode_cb.setChecked(getattr(status, "side_stand", False))
             self.speed_alarm_cb.setChecked(False)
             self.p_gear_protect_cb.setChecked(getattr(status, "p_gear_protect", False))
             self.tcs_status_cb.setChecked(False)
+        elif self.current_protocol in {PROTOCOL_TAILING_Y34B, PROTOCOL_TAILING_Y34F}:
+            self.distance_mode_cb.setChecked(getattr(status, "side_stand", False))
+            self.speed_alarm_cb.setChecked(False)
+            self.p_gear_protect_cb.setChecked(getattr(status, "p_gear_protect", False))
+            self.tcs_status_cb.setChecked(getattr(status, "tailing_national_standard", False))
         elif self.current_protocol == PROTOCOL_YADEA:
             self.distance_mode_cb.setChecked(getattr(status, "side_stand", False))
             self.speed_alarm_cb.setChecked(False)
@@ -2667,36 +2961,65 @@ class MainWindow(QMainWindow):
         self.controller_fault_cb.setChecked(getattr(status, "controller_fault", False))
         self.under_voltage_cb.setChecked(getattr(status, "under_voltage", False))
         self.cruise_cb.setChecked(getattr(status, "cruise", False))
-        self.assist_cb.setChecked(getattr(status, "assist", False))
-        self.motor_phase_loss_cb.setChecked(getattr(status, "motor_phase_loss", False))
+        if self.current_protocol == PROTOCOL_TAILING_Y34F:
+            self.assist_cb.setChecked(getattr(status, "tailing_tire_pressure_low", False))
+            self.motor_phase_loss_cb.setChecked(False)
+        else:
+            self.assist_cb.setChecked(getattr(status, "assist", False))
+            self.motor_phase_loss_cb.setChecked(getattr(status, "motor_phase_loss", False))
 
         self.gear_four_cb.setChecked(getattr(status, "gear_four", False))
-        self.motor_running_cb.setChecked(getattr(status, "motor_running", False))
+        if self.current_protocol == PROTOCOL_TAILING_Y34F:
+            self.motor_running_cb.setChecked(getattr(status, "tailing_tcs_indicator", False))
+        else:
+            self.motor_running_cb.setChecked(getattr(status, "motor_running", False))
         self.brake_cb.setChecked(getattr(status, "brake", False))
-        self.controller_protect_cb.setChecked(getattr(status, "controller_protect", False))
+        if self.current_protocol == PROTOCOL_TAILING_Y34F:
+            self.controller_protect_cb.setChecked(getattr(status, "tailing_hdc_indicator", False))
+        else:
+            self.controller_protect_cb.setChecked(getattr(status, "controller_protect", False))
         self.regen_charging_cb.setChecked(getattr(status, "regen_charging", False))
-        self.anti_runaway_cb.setChecked(getattr(status, "anti_runaway", False))
+        self.anti_runaway_cb.setChecked(
+            False if self.current_protocol == PROTOCOL_TAILING_Y34F else getattr(status, "anti_runaway", False)
+        )
         self.speed_mode_spin.setValue(getattr(status, "speed_mode", 0))
 
-        if self.current_protocol in {PROTOCOL_WUXI_YIGE, PROTOCOL_FZ_SIF}:
+        if self.current_protocol in {
+            PROTOCOL_WUXI_YIGE,
+            PROTOCOL_TAILING_Y34B,
+            PROTOCOL_TAILING_Y34F,
+            PROTOCOL_FZ_SIF,
+        }:
             self.current_70_flag_cb.setChecked(getattr(status, "cloud_power_mode", False))
         else:
             self.current_70_flag_cb.setChecked(getattr(status, "current_70_flag", False))
         if self.current_protocol == PROTOCOL_DONGWEI_GTXH:
             self.one_key_enable_cb.setChecked(getattr(status, "side_stand", False))
+        elif self.current_protocol in {PROTOCOL_TAILING_Y34B, PROTOCOL_TAILING_Y34F}:
+            self.one_key_enable_cb.setChecked(getattr(status, "tailing_actual_speed_mode", False))
         else:
             self.one_key_enable_cb.setChecked(getattr(status, "one_key_enable", False))
-        self.ekk_enable_cb.setChecked(getattr(status, "ekk_enable", False))
+        if self.current_protocol == PROTOCOL_TAILING_Y34F:
+            self.ekk_enable_cb.setChecked(getattr(status, "tailing_dual_undervoltage", False))
+        else:
+            self.ekk_enable_cb.setChecked(getattr(status, "ekk_enable", False))
         self.over_current_cb.setChecked(getattr(status, "over_current", False))
         self.stall_protect_cb.setChecked(getattr(status, "stall_protect", False))
         self.reverse_cb.setChecked(getattr(status, "reverse", False))
-        self.electronic_brake_cb.setChecked(getattr(status, "electronic_brake", False))
-        self.speed_limit_cb.setChecked(getattr(status, "speed_limit", False))
+        if self.current_protocol == PROTOCOL_TAILING_Y34F:
+            seat_state = getattr(status, "tailing_seat_state", 0)
+            self.electronic_brake_cb.setChecked(bool(seat_state & 0x02))
+            self.speed_limit_cb.setChecked(bool(seat_state & 0x01))
+        else:
+            self.electronic_brake_cb.setChecked(getattr(status, "electronic_brake", False))
+            self.speed_limit_cb.setChecked(
+                False if self.current_protocol == PROTOCOL_TAILING_Y34B else getattr(status, "speed_limit", False)
+            )
 
         self.current_spin.setValue(getattr(status, "current_a", 0))
         self.hall_count_spin.setValue(getattr(status, "hall_count", 0))
         self.speed_spin.setValue(getattr(status, "speed_kmh", 0.0))
-        if self.current_protocol in {PROTOCOL_HANGZHOU_ANXIAN, PROTOCOL_FZ_SIF}:
+        if self.current_protocol in {PROTOCOL_HANGZHOU_ANXIAN, PROTOCOL_FZ_SIF, PROTOCOL_JINGXIAN}:
             self.soc_spin.setValue(getattr(status, "voltage_percentage", 0))
         else:
             self.soc_spin.setValue(getattr(status, "soc_percent", 0))
@@ -2726,6 +3049,34 @@ class MainWindow(QMainWindow):
                     button.setChecked(True)
             elif self.current_protocol == PROTOCOL_DONGWEI_GTXH and hasattr(self, "voltage_default_rb"):
                 self.voltage_default_rb.setChecked(True)
+        if getattr(self, "tailing_display_voltage_from_data_cb", None) is not None:
+            self.tailing_display_voltage_from_data_cb.setChecked(
+                getattr(status, "tailing_display_voltage_from_data", False)
+            )
+        if getattr(self, "tailing_battery_over_temp_cb", None) is not None:
+            self.tailing_battery_over_temp_cb.setChecked(getattr(status, "tailing_battery_over_temp", False))
+        if getattr(self, "tailing_battery_over_current_cb", None) is not None:
+            self.tailing_battery_over_current_cb.setChecked(
+                getattr(status, "tailing_battery_over_current", False)
+            )
+        if getattr(self, "tailing_battery_over_voltage_cb", None) is not None:
+            self.tailing_battery_over_voltage_cb.setChecked(
+                getattr(status, "tailing_battery_over_voltage", False)
+            )
+        if getattr(self, "tailing_dual_soc_cb", None) is not None:
+            self.tailing_dual_soc_cb.setChecked(getattr(status, "tailing_dual_soc", False))
+        if getattr(self, "tailing_display_sleep_cb", None) is not None:
+            self.tailing_display_sleep_cb.setChecked(getattr(status, "tailing_display_sleep", False))
+        if getattr(self, "tailing_speed_15_warning_cb", None) is not None:
+            self.tailing_speed_15_warning_cb.setChecked(
+                getattr(status, "tailing_speed_15kmh_warning", False)
+            )
+        if getattr(self, "tailing_brake_fault_cb", None) is not None:
+            self.tailing_brake_fault_cb.setChecked(getattr(status, "tailing_brake_fault", False))
+        if getattr(self, "tailing_real_time_voltage_spin", None) is not None:
+            self.tailing_real_time_voltage_spin.setValue(
+                getattr(status, "tailing_real_time_voltage_v", 48.0)
+            )
     
     def update_xinri_ui_from_status(self):
         """根据新日协议状态更新UI显示"""
@@ -3013,7 +3364,11 @@ class MainWindow(QMainWindow):
             status.side_stand = self.speed_alarm_cb.isChecked()
         elif self.current_protocol == PROTOCOL_DONGWEI_GTXH:
             status.p_gear_protect = self.p_gear_protect_cb.isChecked()
-        elif self.current_protocol in {PROTOCOL_WUXI_YIGE, PROTOCOL_YADEA}:
+        elif self.current_protocol in {PROTOCOL_TAILING_Y34B, PROTOCOL_TAILING_Y34F}:
+            status.side_stand = self.distance_mode_cb.isChecked()
+            status.p_gear_protect = self.p_gear_protect_cb.isChecked()
+            status.tailing_national_standard = self.tcs_status_cb.isChecked()
+        elif self.current_protocol in {PROTOCOL_WUXI_YIGE, PROTOCOL_YADEA, PROTOCOL_JINGXIAN}:
             status.side_stand = self.distance_mode_cb.isChecked()
             status.p_gear_protect = self.p_gear_protect_cb.isChecked()
         else:
@@ -3029,39 +3384,66 @@ class MainWindow(QMainWindow):
         status.controller_fault = self.controller_fault_cb.isChecked()
         status.under_voltage = self.under_voltage_cb.isChecked()
         status.cruise = self.cruise_cb.isChecked()
-        status.assist = self.assist_cb.isChecked()
-        status.motor_phase_loss = self.motor_phase_loss_cb.isChecked()
+        if self.current_protocol == PROTOCOL_TAILING_Y34F:
+            status.tailing_tire_pressure_low = self.assist_cb.isChecked()
+        else:
+            status.assist = self.assist_cb.isChecked()
+            status.motor_phase_loss = self.motor_phase_loss_cb.isChecked()
         
         # Status3
         status.gear_four = self.gear_four_cb.isChecked()
-        status.motor_running = self.motor_running_cb.isChecked()
+        if self.current_protocol == PROTOCOL_TAILING_Y34F:
+            status.tailing_tcs_indicator = self.motor_running_cb.isChecked()
+        else:
+            status.motor_running = self.motor_running_cb.isChecked()
         status.brake = self.brake_cb.isChecked()
-        status.controller_protect = self.controller_protect_cb.isChecked()
+        if self.current_protocol == PROTOCOL_TAILING_Y34F:
+            status.tailing_hdc_indicator = self.controller_protect_cb.isChecked()
+        else:
+            status.controller_protect = self.controller_protect_cb.isChecked()
         status.regen_charging = self.regen_charging_cb.isChecked()
-        status.anti_runaway = self.anti_runaway_cb.isChecked()
+        if self.current_protocol != PROTOCOL_TAILING_Y34F:
+            status.anti_runaway = self.anti_runaway_cb.isChecked()
         status.speed_mode = self.speed_mode_spin.value()
         
         # Status4
-        if self.current_protocol in {PROTOCOL_WUXI_YIGE, PROTOCOL_FZ_SIF}:
+        if self.current_protocol in {
+            PROTOCOL_WUXI_YIGE,
+            PROTOCOL_TAILING_Y34B,
+            PROTOCOL_TAILING_Y34F,
+            PROTOCOL_FZ_SIF,
+        }:
             status.cloud_power_mode = self.current_70_flag_cb.isChecked()
         else:
             status.current_70_flag = self.current_70_flag_cb.isChecked()
         if self.current_protocol == PROTOCOL_DONGWEI_GTXH:
             status.side_stand = self.one_key_enable_cb.isChecked()
+        elif self.current_protocol in {PROTOCOL_TAILING_Y34B, PROTOCOL_TAILING_Y34F}:
+            status.tailing_actual_speed_mode = self.one_key_enable_cb.isChecked()
         else:
             status.one_key_enable = self.one_key_enable_cb.isChecked()
-        status.ekk_enable = self.ekk_enable_cb.isChecked()
+        if self.current_protocol == PROTOCOL_TAILING_Y34F:
+            status.tailing_dual_undervoltage = self.ekk_enable_cb.isChecked()
+        else:
+            status.ekk_enable = self.ekk_enable_cb.isChecked()
         status.over_current = self.over_current_cb.isChecked()
         status.stall_protect = self.stall_protect_cb.isChecked()
         status.reverse = self.reverse_cb.isChecked()
-        status.electronic_brake = self.electronic_brake_cb.isChecked()
-        status.speed_limit = self.speed_limit_cb.isChecked()
+        if self.current_protocol == PROTOCOL_TAILING_Y34F:
+            status.tailing_seat_state = (
+                (0x02 if self.electronic_brake_cb.isChecked() else 0x00)
+                | (0x01 if self.speed_limit_cb.isChecked() else 0x00)
+            )
+        else:
+            status.electronic_brake = self.electronic_brake_cb.isChecked()
+            if self.current_protocol != PROTOCOL_TAILING_Y34B:
+                status.speed_limit = self.speed_limit_cb.isChecked()
         
         # Status5-9
         status.current_a = self.current_spin.value()
         status.hall_count = self.hall_count_spin.value()
         status.speed_kmh = self.speed_spin.value()
-        if self.current_protocol in {PROTOCOL_HANGZHOU_ANXIAN, PROTOCOL_FZ_SIF}:
+        if self.current_protocol in {PROTOCOL_HANGZHOU_ANXIAN, PROTOCOL_FZ_SIF, PROTOCOL_JINGXIAN}:
             status.voltage_percentage = self.soc_spin.value()
         else:
             status.soc_percent = self.soc_spin.value()
@@ -3071,7 +3453,7 @@ class MainWindow(QMainWindow):
             status.soc_fault = self.soc_fault_cb.isChecked()
         if getattr(self, "current_percent_spin", None) is not None:
             status.current_percentage = self.current_percent_spin.value()
-        
+
         # 系统电压
         if getattr(self, "voltage_group", None) is not None:
             voltage_id = self.voltage_group.checkedId()
@@ -3102,6 +3484,30 @@ class MainWindow(QMainWindow):
             status.voltage_80v = False
             status.voltage_84v = False
             status.voltage_96v = False
+        if getattr(self, "tailing_display_voltage_from_data_cb", None) is not None:
+            status.tailing_display_voltage_from_data = (
+                self.tailing_display_voltage_from_data_cb.isChecked()
+            )
+        if getattr(self, "tailing_battery_over_temp_cb", None) is not None:
+            status.tailing_battery_over_temp = self.tailing_battery_over_temp_cb.isChecked()
+        if getattr(self, "tailing_battery_over_current_cb", None) is not None:
+            status.tailing_battery_over_current = (
+                self.tailing_battery_over_current_cb.isChecked()
+            )
+        if getattr(self, "tailing_battery_over_voltage_cb", None) is not None:
+            status.tailing_battery_over_voltage = (
+                self.tailing_battery_over_voltage_cb.isChecked()
+            )
+        if getattr(self, "tailing_dual_soc_cb", None) is not None:
+            status.tailing_dual_soc = self.tailing_dual_soc_cb.isChecked()
+        if getattr(self, "tailing_display_sleep_cb", None) is not None:
+            status.tailing_display_sleep = self.tailing_display_sleep_cb.isChecked()
+        if getattr(self, "tailing_speed_15_warning_cb", None) is not None:
+            status.tailing_speed_15kmh_warning = self.tailing_speed_15_warning_cb.isChecked()
+        if getattr(self, "tailing_brake_fault_cb", None) is not None:
+            status.tailing_brake_fault = self.tailing_brake_fault_cb.isChecked()
+        if getattr(self, "tailing_real_time_voltage_spin", None) is not None:
+            status.tailing_real_time_voltage_v = self.tailing_real_time_voltage_spin.value()
         
         return status
     

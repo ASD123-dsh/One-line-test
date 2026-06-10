@@ -390,7 +390,7 @@ class PacketSequenceDialog(QDialog):
             return
 
         try:
-            with open(path, "r", encoding="utf-8") as file_obj:
+            with open(path, "r", encoding="utf-8-sig") as file_obj:
                 payload = json.load(file_obj)
             imported_frames = load_packet_sequence_payload(payload, self.frame_length)
         except (OSError, json.JSONDecodeError, ValueError) as exc:

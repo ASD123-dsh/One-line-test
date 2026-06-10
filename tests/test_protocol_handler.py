@@ -6,9 +6,12 @@ from protocol.protocol_handler import (
     PROTOCOL_DONGWEI_GTXH,
     PROTOCOL_FZ_SIF,
     PROTOCOL_HANGZHOU_ANXIAN,
+    PROTOCOL_JINGXIAN,
     PROTOCOL_LITHIUM_BMS,
     PROTOCOL_LUYUAN_BMS,
     PROTOCOL_RUILUN,
+    PROTOCOL_TAILING_Y34B,
+    PROTOCOL_TAILING_Y34F,
     PROTOCOL_WUXI_YIGE,
     PROTOCOL_XINCHI,
     PROTOCOL_XINRI,
@@ -135,6 +138,90 @@ class ProtocolHandlerTests(unittest.TestCase):
         self.assertTrue(success, error)
         self.assertEqual(frame, [16, 149, 10, 128, 192, 196, 12, 1, 2, 188, 16, 168])
 
+    def test_tailing_y34b_frame_supports_13_bytes_and_extended_status11(self):
+        status = StatusBits(protocol_name=PROTOCOL_TAILING_Y34B)
+        status.side_stand = True
+        status.p_gear_protect = True
+        status.tailing_national_standard = True
+        status.walk_mode = True
+        status.hall_fault = True
+        status.assist = True
+        status.motor_phase_loss = True
+        status.gear_four = True
+        status.motor_running = True
+        status.brake = True
+        status.regen_charging = True
+        status.anti_runaway = True
+        status.speed_mode = 2
+        status.cloud_power_mode = True
+        status.tailing_actual_speed_mode = True
+        status.ekk_enable = True
+        status.over_current = True
+        status.stall_protect = True
+        status.reverse = True
+        status.electronic_brake = True
+        status.current_a = -3
+        status.speed_kmh = 23.4
+        status.soc_percent = 88
+        status.lithium_soc_mode = True
+        status.voltage_48v = False
+        status.voltage_72v = True
+        status.tailing_dual_soc = True
+        status.tailing_display_sleep = True
+        status.tailing_speed_15kmh_warning = True
+        status.tailing_brake_fault = True
+
+        success, frame, error = self.handler.generate_frame_for_preview(status)
+
+        self.assertTrue(success, error)
+        self.assertEqual(frame, [8, 97, 11, 195, 238, 254, 253, 0, 234, 216, 16, 15, 97])
+
+    def test_tailing_y34f_frame_supports_15_bytes_tcs_hdc_and_realtime_voltage(self):
+        status = StatusBits(protocol_name=PROTOCOL_TAILING_Y34F)
+        status.side_stand = True
+        status.p_gear_protect = True
+        status.tailing_national_standard = True
+        status.walk_mode = True
+        status.hall_fault = True
+        status.throttle_fault = True
+        status.controller_fault = True
+        status.under_voltage = True
+        status.cruise = True
+        status.tailing_tire_pressure_low = True
+        status.gear_four = True
+        status.tailing_tcs_indicator = True
+        status.brake = True
+        status.tailing_hdc_indicator = True
+        status.regen_charging = True
+        status.speed_mode = 1
+        status.cloud_power_mode = True
+        status.tailing_actual_speed_mode = True
+        status.tailing_dual_undervoltage = True
+        status.over_current = True
+        status.stall_protect = True
+        status.reverse = True
+        status.tailing_seat_state = 1
+        status.current_a = 12
+        status.speed_kmh = 45.6
+        status.soc_percent = 77
+        status.lithium_soc_mode = True
+        status.voltage_48v = False
+        status.voltage_84v = True
+        status.tailing_display_voltage_from_data = True
+        status.tailing_battery_over_temp = True
+        status.tailing_battery_over_current = True
+        status.tailing_battery_over_voltage = True
+        status.tailing_dual_soc = True
+        status.tailing_display_sleep = True
+        status.tailing_speed_15kmh_warning = True
+        status.tailing_brake_fault = True
+        status.tailing_real_time_voltage_v = 65.8
+
+        success, frame, error = self.handler.generate_frame_for_preview(status)
+
+        self.assertTrue(success, error)
+        self.assertEqual(frame, [8, 97, 11, 254, 249, 253, 12, 1, 200, 205, 64, 255, 2, 146, 191])
+
     def test_yadea_frame_supports_percentage_current(self):
         status = StatusBits(protocol_name=PROTOCOL_YADEA)
         status.side_stand = True
@@ -178,6 +265,42 @@ class ProtocolHandlerTests(unittest.TestCase):
         self.assertTrue(success, error)
         self.assertEqual(frame, [8, 97, 12, 66, 74, 194, 254, 0, 42, 75, 60, 12])
         self.assertEqual(self.handler.get_protocol_send_mode(PROTOCOL_YOUYIBAO), "uart")
+
+    def test_jingxian_frame_uses_12_bytes_pluscode_and_auto_sequence(self):
+        status = StatusBits(protocol_name=PROTOCOL_JINGXIAN)
+        status.side_stand = True
+        status.p_gear_protect = True
+        status.walk_mode = True
+        status.hall_fault = True
+        status.assist = True
+        status.motor_running = True
+        status.regen_charging = True
+        status.speed_mode = 5
+        status.current_70_flag = True
+        status.one_key_enable = True
+        status.electronic_brake = True
+        status.current_a = -2
+        status.hall_count = 0x002A
+        status.voltage_percentage = 75
+        status.current_percentage = 60
+
+        preview_success, preview_frame, preview_error = self.handler.generate_frame_for_preview(status)
+        send_success, send_frame, send_error = self.handler.generate_frame(status)
+        next_preview_success, next_preview_frame, next_preview_error = self.handler.generate_frame_for_preview(status)
+
+        self.assertTrue(preview_success, preview_error)
+        self.assertTrue(send_success, send_error)
+        self.assertTrue(next_preview_success, next_preview_error)
+        self.assertEqual(
+            preview_frame,
+            [7, 1, 10, 59, 66, 59, 254, 121, 163, 196, 181, 27],
+        )
+        self.assertEqual(send_frame, preview_frame)
+        self.assertEqual(
+            next_preview_frame,
+            [7, 2, 10, 64, 71, 64, 254, 126, 168, 201, 186, 19],
+        )
+        self.assertEqual(self.handler.get_protocol_send_mode(PROTOCOL_JINGXIAN), "uart")
 
     def test_dongwei_gtxh_frame_supports_voltage_state_and_current_percentage(self):
         status = StatusBits(protocol_name=PROTOCOL_DONGWEI_GTXH)
@@ -309,8 +432,11 @@ class ProtocolHandlerTests(unittest.TestCase):
             PROTOCOL_HANGZHOU_ANXIAN,
             PROTOCOL_CHANGZHOU_XINSIWEI,
             PROTOCOL_WUXI_YIGE,
+            PROTOCOL_TAILING_Y34B,
+            PROTOCOL_TAILING_Y34F,
             PROTOCOL_YADEA,
             PROTOCOL_YOUYIBAO,
+            PROTOCOL_JINGXIAN,
             PROTOCOL_DONGWEI_GTXH,
             PROTOCOL_XINCHI,
             PROTOCOL_LUYUAN_BMS,

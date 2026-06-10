@@ -1,16 +1,20 @@
+import os
 import unittest
 from unittest.mock import patch
 
-from PyQt5.QtCore import QCoreApplication
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from PyQt5.QtWidgets import QApplication
 
 from serial_comm.serial_manager import (
     SEND_MODE_BATTERY_SINGLE_WIRE,
+    SEND_MODE_JINGXIAN_SIF,
     SEND_MODE_LUYUAN_BMS_SIF,
     SerialManager,
 )
 
 
-_APP = QCoreApplication.instance() or QCoreApplication([])
+_APP = QApplication.instance() or QApplication([])
 
 
 class FakeSerialPort:
@@ -88,6 +92,31 @@ class SerialManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.cyclic_data, frame_sequence[0])
         self.assertEqual(self.manager.cyclic_frame_index, 0)
         mock_start.assert_called_once_with(1200)
+
+    def test_update_cyclic_send_interval_restarts_active_timer(self):
+        self.manager.cyclic_frame_sequence = [[0x3A, 0xC0, 0x50, 0x7E, 0x00, 0x1C, 0x1F, 0x02, 0x12, 0x17]]
+        self.manager.cyclic_send_mode = "uart"
+
+        with patch.object(self.manager.send_timer, "isActive", return_value=True):
+            with patch.object(self.manager.send_timer, "start") as mock_start:
+                success, error = self.manager.update_cyclic_send_interval(1500)
+
+        self.assertTrue(success, error)
+        self.assertEqual(error, "")
+        self.assertEqual(self.manager.send_interval_ms, 1500)
+        mock_start.assert_called_once_with(1500)
+
+    def test_update_cyclic_send_interval_rejects_invalid_battery_single_wire_value(self):
+        self.manager.cyclic_frame_sequence = [[0x00, 0x50, 0x00, 0x00, 0x00, 0x50]]
+        self.manager.cyclic_send_mode = SEND_MODE_BATTERY_SINGLE_WIRE
+
+        with patch.object(self.manager.send_timer, "isActive", return_value=True):
+            with patch.object(self.manager.send_timer, "start") as mock_start:
+                success, error = self.manager.update_cyclic_send_interval(500)
+
+        self.assertFalse(success)
+        self.assertEqual(error, "电池单线通讯协议发送间隔必须在1000ms-2000ms范围内")
+        mock_start.assert_not_called()
 
     def test_send_cyclic_data_rotates_packet_sequence(self):
         frame_sequence = [
@@ -174,6 +203,24 @@ class SerialManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.serial_port.break_history[-1], False)
         self.assertEqual([call.args[0] for call in mock_sleep.call_args_list[:6]], [40, 2, 4, 2, 4, 2])
         self.assertEqual(mock_sleep.call_args_list[-1].args[0], 10)
+
+    def test_jingxian_mode_uses_lsb_first_pulses_and_holds_low_after_stop(self):
+        frame_data = [0x07] + [0x00] * 11
+
+        with patch.object(self.manager, "_sleep_ms") as mock_sleep:
+            success, error = self.manager.send_single_frame(
+                frame_data,
+                skip_ui_update=True,
+                send_mode=SEND_MODE_JINGXIAN_SIF,
+            )
+
+        self.assertTrue(success, error)
+        self.assertEqual(error, "")
+        self.assertIsNone(self.manager.serial_port.last_payload)
+        self.assertEqual(self.manager.serial_port.break_history[:4], [True, False, True, False])
+        self.assertEqual(self.manager.serial_port.break_history[-1], True)
+        self.assertEqual([call.args[0] for call in mock_sleep.call_args_list[:6]], [50, 1, 0.5, 1, 0.5, 1])
+        self.assertEqual(mock_sleep.call_args_list[-1].args[0], 0)
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ from protocol.protocol_handler import (
     PROTOCOL_RUILUN,
     PROTOCOL_TAILING_Y34B,
     PROTOCOL_TAILING_Y34F,
+    PROTOCOL_SHENZHOUXING,
     PROTOCOL_WUXI_YIGE,
     PROTOCOL_XINCHI,
     PROTOCOL_XINRI,
@@ -221,6 +222,52 @@ class ProtocolHandlerTests(unittest.TestCase):
 
         self.assertTrue(success, error)
         self.assertEqual(frame, [8, 97, 11, 254, 249, 253, 12, 1, 200, 205, 64, 255, 2, 146, 191])
+
+    def test_shenzhouxing_frame_supports_extended_status_and_time_fields(self):
+        status = StatusBits(protocol_name=PROTOCOL_SHENZHOUXING)
+        status.side_stand = True
+        status.shenzhouxing_hdc = True
+        status.p_gear_protect = True
+        status.shenzhouxing_hhc = True
+        status.shenzhouxing_tcs = True
+        status.hall_fault = True
+        status.throttle_fault = True
+        status.controller_fault = True
+        status.under_voltage = True
+        status.cruise = True
+        status.assist = True
+        status.motor_phase_loss = True
+        status.gear_four = True
+        status.motor_running = True
+        status.shenzhouxing_brake_fault = True
+        status.controller_protect = True
+        status.regen_charging = True
+        status.anti_runaway = True
+        status.speed_mode = 3
+        status.shenzhouxing_bluetooth = True
+        status.shenzhouxing_time_display = True
+        status.shenzhouxing_4g_signal_indicator = True
+        status.shenzhouxing_position_indicator = True
+        status.stall_protect = True
+        status.reverse = True
+        status.brake = True
+        status.speed_limit = True
+        status.current_a = -7
+        status.hall_count = 0x1234
+        status.soc_percent = 93
+        status.lithium_soc_mode = True
+        status.voltage_48v = False
+        status.voltage_72v = True
+        status.shenzhouxing_signal_strength = 29
+        status.shenzhouxing_time_hour = 21
+        status.shenzhouxing_time_minute = 47
+        status.shenzhouxing_push_assist = True
+        status.shenzhouxing_p_blink = True
+
+        success, frame, error = self.handler.generate_frame_for_preview(status)
+
+        self.assertTrue(success, error)
+        self.assertEqual(frame, [31, 238, 15, 255, 255, 255, 249, 18, 52, 221, 16, 237, 111, 192, 81])
 
     def test_yadea_frame_supports_percentage_current(self):
         status = StatusBits(protocol_name=PROTOCOL_YADEA)
@@ -434,6 +481,7 @@ class ProtocolHandlerTests(unittest.TestCase):
             PROTOCOL_WUXI_YIGE,
             PROTOCOL_TAILING_Y34B,
             PROTOCOL_TAILING_Y34F,
+            PROTOCOL_SHENZHOUXING,
             PROTOCOL_YADEA,
             PROTOCOL_YOUYIBAO,
             PROTOCOL_JINGXIAN,

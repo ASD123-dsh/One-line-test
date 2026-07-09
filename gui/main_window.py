@@ -32,6 +32,7 @@ from protocol.protocol_handler import (
     PROTOCOL_RUILUN,
     PROTOCOL_TAILING_Y34B,
     PROTOCOL_TAILING_Y34F,
+    PROTOCOL_SHENZHOUXING,
     PROTOCOL_WUXI_YIGE,
     PROTOCOL_XINCHI,
     PROTOCOL_XINRI,
@@ -379,6 +380,7 @@ class MainWindow(QMainWindow):
                 PROTOCOL_WUXI_YIGE,
                 PROTOCOL_TAILING_Y34B,
                 PROTOCOL_TAILING_Y34F,
+                PROTOCOL_SHENZHOUXING,
                 PROTOCOL_YADEA,
                 PROTOCOL_YOUYIBAO,
                 PROTOCOL_JINGXIAN,
@@ -524,6 +526,13 @@ class MainWindow(QMainWindow):
                 ("驻车指示(P档) (D1)", True),
                 ("国标状态 (D0) - 1=国标/0=轻摩", True),
             ]
+        elif protocol == PROTOCOL_SHENZHOUXING:
+            labels = [
+                ("侧撑指示 (D3)", True),
+                ("HDC(陡坡缓降) (D2)", True),
+                ("P挡 (D1)", True),
+                ("HHC(坡道驻车) (D0)", True),
+            ]
         elif protocol == PROTOCOL_YADEA:
             labels = [
                 ("单撑断电检测 (D3)", True),
@@ -635,6 +644,9 @@ class MainWindow(QMainWindow):
             if self.current_protocol == PROTOCOL_TAILING_Y34F
             else "助力 (D1)"
         )
+        if self.current_protocol == PROTOCOL_SHENZHOUXING:
+            self.status2_d7_cb.setText("TCS (D7)")
+            self.status2_d7_cb.setEnabled(True)
         self.assist_cb = QCheckBox(assist_text)
         layout.addWidget(
             self.assist_cb,
@@ -688,6 +700,8 @@ class MainWindow(QMainWindow):
             if self.current_protocol == PROTOCOL_TAILING_Y34F
             else "电机运行状态 (D6) - 1=运行/0=停止"
         )
+        if self.current_protocol == PROTOCOL_SHENZHOUXING:
+            motor_running_text = "电机运行中 (D6)"
         self.motor_running_cb = QCheckBox(motor_running_text)
         layout.addWidget(
             self.motor_running_cb,
@@ -698,6 +712,8 @@ class MainWindow(QMainWindow):
         )
         
         self.brake_cb = QCheckBox("刹车 (D5)")
+        if self.current_protocol == PROTOCOL_SHENZHOUXING:
+            self.brake_cb.setText("刹车故障 (D5)")
         layout.addWidget(self.brake_cb, 1, 0)
         
         controller_protect_text = (
@@ -705,6 +721,8 @@ class MainWindow(QMainWindow):
             if self.current_protocol == PROTOCOL_TAILING_Y34F
             else "控制器保护 (D4)"
         )
+        if self.current_protocol == PROTOCOL_SHENZHOUXING:
+            controller_protect_text = "控制器保护 (D4)"
         self.controller_protect_cb = QCheckBox(controller_protect_text)
         layout.addWidget(self.controller_protect_cb, 1, 1)
         
@@ -780,7 +798,11 @@ class MainWindow(QMainWindow):
             d7_text = "备用 (D7)"
             d7_enabled = False
 
+        if self.current_protocol == PROTOCOL_SHENZHOUXING:
+            d7_enabled = True
         self.current_70_flag_cb = QCheckBox(d7_text)
+        if self.current_protocol == PROTOCOL_SHENZHOUXING:
+            self.current_70_flag_cb.setText("蓝牙指示 (D7)")
         self.current_70_flag_cb.setEnabled(d7_enabled)
         layout.addWidget(self.current_70_flag_cb, 0, 0)
         
@@ -793,6 +815,8 @@ class MainWindow(QMainWindow):
                 else "一键通启用 (D6)"
             )
         self.one_key_enable_cb = QCheckBox(d6_text)
+        if self.current_protocol == PROTOCOL_SHENZHOUXING:
+            self.one_key_enable_cb.setText("时间显示使能 (D6)")
         layout.addWidget(self.one_key_enable_cb, 0, 1)
         
         if self.current_protocol == PROTOCOL_TAILING_Y34B:
@@ -802,6 +826,8 @@ class MainWindow(QMainWindow):
         else:
             ekk_text = "EKK启用 (D5)"
         self.ekk_enable_cb = QCheckBox(ekk_text)
+        if self.current_protocol == PROTOCOL_SHENZHOUXING:
+            self.ekk_enable_cb.setText("4G信号指示 (D5)")
         layout.addWidget(
             self.ekk_enable_cb,
             0 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 1,
@@ -814,6 +840,8 @@ class MainWindow(QMainWindow):
             else "过流保护 (D4)"
         )
         self.over_current_cb = QCheckBox(over_current_text)
+        if self.current_protocol == PROTOCOL_SHENZHOUXING:
+            self.over_current_cb.setText("定位指示 (D4)")
         layout.addWidget(
             self.over_current_cb,
             0 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 1,
@@ -826,6 +854,8 @@ class MainWindow(QMainWindow):
             else "堵转保护 (D3)"
         )
         self.stall_protect_cb = QCheckBox(stall_protect_text)
+        if self.current_protocol == PROTOCOL_SHENZHOUXING:
+            self.stall_protect_cb.setText("堵转保护 (D3)")
         layout.addWidget(
             self.stall_protect_cb,
             1 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 2,
@@ -845,6 +875,8 @@ class MainWindow(QMainWindow):
             else "电子刹车 (D1)"
         )
         self.electronic_brake_cb = QCheckBox(electronic_brake_text)
+        if self.current_protocol == PROTOCOL_SHENZHOUXING:
+            self.electronic_brake_cb.setText("刹车 (D1)")
         layout.addWidget(
             self.electronic_brake_cb,
             1 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 3,
@@ -858,6 +890,9 @@ class MainWindow(QMainWindow):
         else:
             speed_limit_text = "限速 (D0) - 1=限速/0=解除"
         self.speed_limit_cb = QCheckBox(speed_limit_text)
+        if self.current_protocol == PROTOCOL_SHENZHOUXING:
+            self.speed_limit_cb.setText("限速 (D0)")
+            self.speed_limit_cb.setEnabled(True)
         self.speed_limit_cb.setEnabled(self.current_protocol != PROTOCOL_TAILING_Y34B)
         layout.addWidget(
             self.speed_limit_cb,
@@ -946,9 +981,10 @@ class MainWindow(QMainWindow):
             PROTOCOL_WUXI_YIGE,
             PROTOCOL_TAILING_Y34B,
             PROTOCOL_TAILING_Y34F,
+            PROTOCOL_SHENZHOUXING,
         }:
             self.lithium_soc_mode_cb = QCheckBox(
-                "锂电SOC模式" if protocol == PROTOCOL_RUILUN else "透传锂电SOC(D7=1)"
+                "锂电SOC模式" if protocol in {PROTOCOL_RUILUN, PROTOCOL_SHENZHOUXING} else "透传锂电SOC(D7=1)"
             )
             self.lithium_soc_mode_cb.setChecked(True)
             status8_layout.addWidget(self.lithium_soc_mode_cb)
@@ -1034,6 +1070,38 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(voltage_group, row_index, 0, 1, 2)
         
+        return widget
+
+    def create_shenzhouxing_extended_status_tab(self) -> QWidget:
+        """创建神州行协议扩展状态页。"""
+        widget = QWidget()
+        layout = QGridLayout(widget)
+
+        layout.addWidget(QLabel("实时电压(铅酸模式, 0-127V):"), 0, 0)
+        self.shenzhouxing_real_time_voltage_spin = QSpinBox()
+        self.shenzhouxing_real_time_voltage_spin.setRange(0, 127)
+        layout.addWidget(self.shenzhouxing_real_time_voltage_spin, 0, 1)
+
+        layout.addWidget(QLabel("4G信号强度 (0-31):"), 1, 0)
+        self.shenzhouxing_signal_strength_spin = QSpinBox()
+        self.shenzhouxing_signal_strength_spin.setRange(0, 31)
+        layout.addWidget(self.shenzhouxing_signal_strength_spin, 1, 1)
+
+        layout.addWidget(QLabel("时间 小时 (0-23):"), 2, 0)
+        self.shenzhouxing_time_hour_spin = QSpinBox()
+        self.shenzhouxing_time_hour_spin.setRange(0, 23)
+        layout.addWidget(self.shenzhouxing_time_hour_spin, 2, 1)
+
+        layout.addWidget(QLabel("时间 分钟 (0-59):"), 3, 0)
+        self.shenzhouxing_time_minute_spin = QSpinBox()
+        self.shenzhouxing_time_minute_spin.setRange(0, 59)
+        layout.addWidget(self.shenzhouxing_time_minute_spin, 3, 1)
+
+        self.shenzhouxing_push_assist_cb = QCheckBox("推到车 (DATA13 D7)")
+        layout.addWidget(self.shenzhouxing_push_assist_cb, 4, 0)
+        self.shenzhouxing_p_blink_cb = QCheckBox("P档闪烁 (DATA13 D6)")
+        layout.addWidget(self.shenzhouxing_p_blink_cb, 4, 1)
+
         return widget
 
     def create_tailing_extended_status_tab(self) -> QWidget:
@@ -1408,6 +1476,8 @@ class MainWindow(QMainWindow):
             self.switch_to_tailing_y34b_protocol()
         elif protocol_name == PROTOCOL_TAILING_Y34F:
             self.switch_to_tailing_y34f_protocol()
+        elif protocol_name == PROTOCOL_SHENZHOUXING:
+            self.switch_to_shenzhouxing_protocol()
         elif protocol_name == PROTOCOL_YADEA:
             self.switch_to_yadea_protocol()
         elif protocol_name == PROTOCOL_YOUYIBAO:
@@ -1504,6 +1574,13 @@ class MainWindow(QMainWindow):
         self.normal_radio.setChecked(True)
         self.on_scenario_changed()
 
+    def switch_to_shenzhouxing_protocol(self):
+        """切换到神州行协议"""
+        self.current_status = PresetScenarios.shenzhouxing_normal_running()
+        self.show_ruilun_status_config()
+        self.normal_radio.setChecked(True)
+        self.on_scenario_changed()
+
     def switch_to_yadea_protocol(self):
         """切换到雅迪协议"""
         self.current_status = PresetScenarios.yadea_normal_running()
@@ -1566,8 +1643,8 @@ class MainWindow(QMainWindow):
             return
 
         if self.current_protocol == PROTOCOL_BATTERY_SINGLE_WIRE:
-            self.interval_spin.setRange(1000, 2000)
-            self.interval_spin.setValue(2000)
+            self.interval_spin.setRange(500, 5000)
+            self.interval_spin.setValue(500)
             return
 
         if self.current_protocol == PROTOCOL_XINCHI:
@@ -1607,6 +1684,12 @@ class MainWindow(QMainWindow):
             "tailing_speed_15_warning_cb",
             "tailing_brake_fault_cb",
             "tailing_real_time_voltage_spin",
+            "shenzhouxing_real_time_voltage_spin",
+            "shenzhouxing_signal_strength_spin",
+            "shenzhouxing_time_hour_spin",
+            "shenzhouxing_time_minute_spin",
+            "shenzhouxing_push_assist_cb",
+            "shenzhouxing_p_blink_cb",
         ):
             if hasattr(self, attr_name):
                 delattr(self, attr_name)
@@ -1631,6 +1714,8 @@ class MainWindow(QMainWindow):
         self.status_tabs.addTab(status5_9_tab, "Status5-9")
         if self.current_protocol in {PROTOCOL_TAILING_Y34B, PROTOCOL_TAILING_Y34F}:
             self.status_tabs.addTab(self.create_tailing_extended_status_tab(), "扩展状态")
+        elif self.current_protocol == PROTOCOL_SHENZHOUXING:
+            self.status_tabs.addTab(self.create_shenzhouxing_extended_status_tab(), "扩展状态")
         self._compact_status_tab_pages()
         
         # 重新连接信号
@@ -2519,6 +2604,18 @@ class MainWindow(QMainWindow):
             self.soc_fault_cb.toggled.connect(self.update_current_frame_display)
         if hasattr(self, 'voltage_group'):
             self.voltage_group.buttonClicked.connect(self.update_current_frame_display)
+        if hasattr(self, 'shenzhouxing_real_time_voltage_spin'):
+            self.shenzhouxing_real_time_voltage_spin.valueChanged.connect(self.update_current_frame_display)
+        if hasattr(self, 'shenzhouxing_signal_strength_spin'):
+            self.shenzhouxing_signal_strength_spin.valueChanged.connect(self.update_current_frame_display)
+        if hasattr(self, 'shenzhouxing_time_hour_spin'):
+            self.shenzhouxing_time_hour_spin.valueChanged.connect(self.update_current_frame_display)
+        if hasattr(self, 'shenzhouxing_time_minute_spin'):
+            self.shenzhouxing_time_minute_spin.valueChanged.connect(self.update_current_frame_display)
+        if hasattr(self, 'shenzhouxing_push_assist_cb'):
+            self.shenzhouxing_push_assist_cb.toggled.connect(self.update_current_frame_display)
+        if hasattr(self, 'shenzhouxing_p_blink_cb'):
+            self.shenzhouxing_p_blink_cb.toggled.connect(self.update_current_frame_display)
     
     def show_hangzhou_anxian_status_config(self):
         """显示杭州安显协议Status配置界面"""
@@ -2584,6 +2681,8 @@ class MainWindow(QMainWindow):
                 self.load_tailing_y34b_preset_scenario(scenario_id)
             elif self.current_protocol == PROTOCOL_TAILING_Y34F:
                 self.load_tailing_y34f_preset_scenario(scenario_id)
+            elif self.current_protocol == PROTOCOL_SHENZHOUXING:
+                self.load_shenzhouxing_preset_scenario(scenario_id)
             elif self.current_protocol == PROTOCOL_YADEA:
                 self.load_yadea_preset_scenario(scenario_id)
             elif self.current_protocol == PROTOCOL_YOUYIBAO:
@@ -2697,6 +2796,19 @@ class MainWindow(QMainWindow):
             self.current_status = PresetScenarios.tailing_y34f_fault_scenario()
         else:
             self.current_status = StatusBits(protocol_name=PROTOCOL_TAILING_Y34F)
+
+        self.update_ruilun_ui_from_status()
+
+    def load_shenzhouxing_preset_scenario(self, scenario_id):
+        """加载神州行协议预设场景"""
+        if scenario_id == 0:
+            self.current_status = PresetScenarios.shenzhouxing_normal_running()
+        elif scenario_id == 1:
+            self.current_status = PresetScenarios.shenzhouxing_energy_recovery()
+        elif scenario_id == 2:
+            self.current_status = PresetScenarios.shenzhouxing_fault_scenario()
+        else:
+            self.current_status = StatusBits(protocol_name=PROTOCOL_SHENZHOUXING)
 
         self.update_ruilun_ui_from_status()
 
@@ -2939,6 +3051,11 @@ class MainWindow(QMainWindow):
             self.speed_alarm_cb.setChecked(False)
             self.p_gear_protect_cb.setChecked(getattr(status, "p_gear_protect", False))
             self.tcs_status_cb.setChecked(getattr(status, "tailing_national_standard", False))
+        elif self.current_protocol == PROTOCOL_SHENZHOUXING:
+            self.distance_mode_cb.setChecked(getattr(status, "side_stand", False))
+            self.speed_alarm_cb.setChecked(getattr(status, "shenzhouxing_hdc", False))
+            self.p_gear_protect_cb.setChecked(getattr(status, "p_gear_protect", False))
+            self.tcs_status_cb.setChecked(getattr(status, "shenzhouxing_hhc", False))
         elif self.current_protocol == PROTOCOL_YADEA:
             self.distance_mode_cb.setChecked(getattr(status, "side_stand", False))
             self.speed_alarm_cb.setChecked(False)
@@ -2967,13 +3084,18 @@ class MainWindow(QMainWindow):
         else:
             self.assist_cb.setChecked(getattr(status, "assist", False))
             self.motor_phase_loss_cb.setChecked(getattr(status, "motor_phase_loss", False))
+        if self.current_protocol == PROTOCOL_SHENZHOUXING:
+            self.status2_d7_cb.setChecked(getattr(status, "shenzhouxing_tcs", False))
 
         self.gear_four_cb.setChecked(getattr(status, "gear_four", False))
         if self.current_protocol == PROTOCOL_TAILING_Y34F:
             self.motor_running_cb.setChecked(getattr(status, "tailing_tcs_indicator", False))
         else:
             self.motor_running_cb.setChecked(getattr(status, "motor_running", False))
-        self.brake_cb.setChecked(getattr(status, "brake", False))
+        if self.current_protocol == PROTOCOL_SHENZHOUXING:
+            self.brake_cb.setChecked(getattr(status, "shenzhouxing_brake_fault", False))
+        else:
+            self.brake_cb.setChecked(getattr(status, "brake", False))
         if self.current_protocol == PROTOCOL_TAILING_Y34F:
             self.controller_protect_cb.setChecked(getattr(status, "tailing_hdc_indicator", False))
         else:
@@ -2991,25 +3113,37 @@ class MainWindow(QMainWindow):
             PROTOCOL_FZ_SIF,
         }:
             self.current_70_flag_cb.setChecked(getattr(status, "cloud_power_mode", False))
+        elif self.current_protocol == PROTOCOL_SHENZHOUXING:
+            self.current_70_flag_cb.setChecked(getattr(status, "shenzhouxing_bluetooth", False))
         else:
             self.current_70_flag_cb.setChecked(getattr(status, "current_70_flag", False))
         if self.current_protocol == PROTOCOL_DONGWEI_GTXH:
             self.one_key_enable_cb.setChecked(getattr(status, "side_stand", False))
         elif self.current_protocol in {PROTOCOL_TAILING_Y34B, PROTOCOL_TAILING_Y34F}:
             self.one_key_enable_cb.setChecked(getattr(status, "tailing_actual_speed_mode", False))
+        elif self.current_protocol == PROTOCOL_SHENZHOUXING:
+            self.one_key_enable_cb.setChecked(getattr(status, "shenzhouxing_time_display", False))
         else:
             self.one_key_enable_cb.setChecked(getattr(status, "one_key_enable", False))
         if self.current_protocol == PROTOCOL_TAILING_Y34F:
             self.ekk_enable_cb.setChecked(getattr(status, "tailing_dual_undervoltage", False))
+        elif self.current_protocol == PROTOCOL_SHENZHOUXING:
+            self.ekk_enable_cb.setChecked(getattr(status, "shenzhouxing_4g_signal_indicator", False))
         else:
             self.ekk_enable_cb.setChecked(getattr(status, "ekk_enable", False))
-        self.over_current_cb.setChecked(getattr(status, "over_current", False))
+        if self.current_protocol == PROTOCOL_SHENZHOUXING:
+            self.over_current_cb.setChecked(getattr(status, "shenzhouxing_position_indicator", False))
+        else:
+            self.over_current_cb.setChecked(getattr(status, "over_current", False))
         self.stall_protect_cb.setChecked(getattr(status, "stall_protect", False))
         self.reverse_cb.setChecked(getattr(status, "reverse", False))
         if self.current_protocol == PROTOCOL_TAILING_Y34F:
             seat_state = getattr(status, "tailing_seat_state", 0)
             self.electronic_brake_cb.setChecked(bool(seat_state & 0x02))
             self.speed_limit_cb.setChecked(bool(seat_state & 0x01))
+        elif self.current_protocol == PROTOCOL_SHENZHOUXING:
+            self.electronic_brake_cb.setChecked(getattr(status, "brake", False))
+            self.speed_limit_cb.setChecked(getattr(status, "speed_limit", False))
         else:
             self.electronic_brake_cb.setChecked(getattr(status, "electronic_brake", False))
             self.speed_limit_cb.setChecked(
@@ -3077,6 +3211,22 @@ class MainWindow(QMainWindow):
             self.tailing_real_time_voltage_spin.setValue(
                 getattr(status, "tailing_real_time_voltage_v", 48.0)
             )
+        if getattr(self, "shenzhouxing_real_time_voltage_spin", None) is not None:
+            self.shenzhouxing_real_time_voltage_spin.setValue(
+                getattr(status, "shenzhouxing_real_time_voltage_v", 48)
+            )
+        if getattr(self, "shenzhouxing_signal_strength_spin", None) is not None:
+            self.shenzhouxing_signal_strength_spin.setValue(
+                getattr(status, "shenzhouxing_signal_strength", 0)
+            )
+        if getattr(self, "shenzhouxing_time_hour_spin", None) is not None:
+            self.shenzhouxing_time_hour_spin.setValue(getattr(status, "shenzhouxing_time_hour", 0))
+        if getattr(self, "shenzhouxing_time_minute_spin", None) is not None:
+            self.shenzhouxing_time_minute_spin.setValue(getattr(status, "shenzhouxing_time_minute", 0))
+        if getattr(self, "shenzhouxing_push_assist_cb", None) is not None:
+            self.shenzhouxing_push_assist_cb.setChecked(getattr(status, "shenzhouxing_push_assist", False))
+        if getattr(self, "shenzhouxing_p_blink_cb", None) is not None:
+            self.shenzhouxing_p_blink_cb.setChecked(getattr(status, "shenzhouxing_p_blink", False))
     
     def update_xinri_ui_from_status(self):
         """根据新日协议状态更新UI显示"""
@@ -3368,6 +3518,11 @@ class MainWindow(QMainWindow):
             status.side_stand = self.distance_mode_cb.isChecked()
             status.p_gear_protect = self.p_gear_protect_cb.isChecked()
             status.tailing_national_standard = self.tcs_status_cb.isChecked()
+        elif self.current_protocol == PROTOCOL_SHENZHOUXING:
+            status.side_stand = self.distance_mode_cb.isChecked()
+            status.shenzhouxing_hdc = self.speed_alarm_cb.isChecked()
+            status.p_gear_protect = self.p_gear_protect_cb.isChecked()
+            status.shenzhouxing_hhc = self.tcs_status_cb.isChecked()
         elif self.current_protocol in {PROTOCOL_WUXI_YIGE, PROTOCOL_YADEA, PROTOCOL_JINGXIAN}:
             status.side_stand = self.distance_mode_cb.isChecked()
             status.p_gear_protect = self.p_gear_protect_cb.isChecked()
@@ -3378,7 +3533,10 @@ class MainWindow(QMainWindow):
             status.tcs_status = self.tcs_status_cb.isChecked()
         
         # Status2
-        status.walk_mode = self.status2_d7_cb.isChecked()
+        if self.current_protocol == PROTOCOL_SHENZHOUXING:
+            status.shenzhouxing_tcs = self.status2_d7_cb.isChecked()
+        else:
+            status.walk_mode = self.status2_d7_cb.isChecked()
         status.hall_fault = self.hall_fault_cb.isChecked()
         status.throttle_fault = self.throttle_fault_cb.isChecked()
         status.controller_fault = self.controller_fault_cb.isChecked()
@@ -3396,7 +3554,10 @@ class MainWindow(QMainWindow):
             status.tailing_tcs_indicator = self.motor_running_cb.isChecked()
         else:
             status.motor_running = self.motor_running_cb.isChecked()
-        status.brake = self.brake_cb.isChecked()
+        if self.current_protocol == PROTOCOL_SHENZHOUXING:
+            status.shenzhouxing_brake_fault = self.brake_cb.isChecked()
+        else:
+            status.brake = self.brake_cb.isChecked()
         if self.current_protocol == PROTOCOL_TAILING_Y34F:
             status.tailing_hdc_indicator = self.controller_protect_cb.isChecked()
         else:
@@ -3414,19 +3575,28 @@ class MainWindow(QMainWindow):
             PROTOCOL_FZ_SIF,
         }:
             status.cloud_power_mode = self.current_70_flag_cb.isChecked()
+        elif self.current_protocol == PROTOCOL_SHENZHOUXING:
+            status.shenzhouxing_bluetooth = self.current_70_flag_cb.isChecked()
         else:
             status.current_70_flag = self.current_70_flag_cb.isChecked()
         if self.current_protocol == PROTOCOL_DONGWEI_GTXH:
             status.side_stand = self.one_key_enable_cb.isChecked()
         elif self.current_protocol in {PROTOCOL_TAILING_Y34B, PROTOCOL_TAILING_Y34F}:
             status.tailing_actual_speed_mode = self.one_key_enable_cb.isChecked()
+        elif self.current_protocol == PROTOCOL_SHENZHOUXING:
+            status.shenzhouxing_time_display = self.one_key_enable_cb.isChecked()
         else:
             status.one_key_enable = self.one_key_enable_cb.isChecked()
         if self.current_protocol == PROTOCOL_TAILING_Y34F:
             status.tailing_dual_undervoltage = self.ekk_enable_cb.isChecked()
+        elif self.current_protocol == PROTOCOL_SHENZHOUXING:
+            status.shenzhouxing_4g_signal_indicator = self.ekk_enable_cb.isChecked()
         else:
             status.ekk_enable = self.ekk_enable_cb.isChecked()
-        status.over_current = self.over_current_cb.isChecked()
+        if self.current_protocol == PROTOCOL_SHENZHOUXING:
+            status.shenzhouxing_position_indicator = self.over_current_cb.isChecked()
+        else:
+            status.over_current = self.over_current_cb.isChecked()
         status.stall_protect = self.stall_protect_cb.isChecked()
         status.reverse = self.reverse_cb.isChecked()
         if self.current_protocol == PROTOCOL_TAILING_Y34F:
@@ -3434,6 +3604,9 @@ class MainWindow(QMainWindow):
                 (0x02 if self.electronic_brake_cb.isChecked() else 0x00)
                 | (0x01 if self.speed_limit_cb.isChecked() else 0x00)
             )
+        elif self.current_protocol == PROTOCOL_SHENZHOUXING:
+            status.brake = self.electronic_brake_cb.isChecked()
+            status.speed_limit = self.speed_limit_cb.isChecked()
         else:
             status.electronic_brake = self.electronic_brake_cb.isChecked()
             if self.current_protocol != PROTOCOL_TAILING_Y34B:
@@ -3508,6 +3681,18 @@ class MainWindow(QMainWindow):
             status.tailing_brake_fault = self.tailing_brake_fault_cb.isChecked()
         if getattr(self, "tailing_real_time_voltage_spin", None) is not None:
             status.tailing_real_time_voltage_v = self.tailing_real_time_voltage_spin.value()
+        if getattr(self, "shenzhouxing_real_time_voltage_spin", None) is not None:
+            status.shenzhouxing_real_time_voltage_v = self.shenzhouxing_real_time_voltage_spin.value()
+        if getattr(self, "shenzhouxing_signal_strength_spin", None) is not None:
+            status.shenzhouxing_signal_strength = self.shenzhouxing_signal_strength_spin.value()
+        if getattr(self, "shenzhouxing_time_hour_spin", None) is not None:
+            status.shenzhouxing_time_hour = self.shenzhouxing_time_hour_spin.value()
+        if getattr(self, "shenzhouxing_time_minute_spin", None) is not None:
+            status.shenzhouxing_time_minute = self.shenzhouxing_time_minute_spin.value()
+        if getattr(self, "shenzhouxing_push_assist_cb", None) is not None:
+            status.shenzhouxing_push_assist = self.shenzhouxing_push_assist_cb.isChecked()
+        if getattr(self, "shenzhouxing_p_blink_cb", None) is not None:
+            status.shenzhouxing_p_blink = self.shenzhouxing_p_blink_cb.isChecked()
         
         return status
     

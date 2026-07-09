@@ -344,10 +344,7 @@ class SerialManager(QObject):
                 return False, f"第{index}组数据包不能为空"
             normalized_frames.append(frame_data.copy())
 
-        if send_mode == SEND_MODE_BATTERY_SINGLE_WIRE:
-            if not (1000 <= interval_ms <= 2000):
-                return False, "电池单线通讯协议发送间隔必须在1000ms-2000ms范围内"
-        elif not (500 <= interval_ms <= 5000):
+        if not (500 <= interval_ms <= 5000):
             return False, "发送间隔必须在500ms-5000ms范围内"
 
         self.cyclic_data = normalized_frames[0].copy()
@@ -364,10 +361,7 @@ class SerialManager(QObject):
         if not self.is_cyclic_sending():
             return False, "当前没有正在运行的循环发送"
 
-        if self.cyclic_send_mode == SEND_MODE_BATTERY_SINGLE_WIRE:
-            if not (1000 <= interval_ms <= 2000):
-                return False, "电池单线通讯协议发送间隔必须在1000ms-2000ms范围内"
-        elif not (500 <= interval_ms <= 5000):
+        if not (500 <= interval_ms <= 5000):
             return False, "发送间隔必须在500ms-5000ms范围内"
 
         self.send_interval_ms = interval_ms

@@ -17,6 +17,7 @@ PROTOCOL_CHANGZHOU_XINSIWEI = "常州新思维协议"
 PROTOCOL_WUXI_YIGE = "无锡一格Y67协议"
 PROTOCOL_TAILING_Y34B = "无锡台铃Y34B协议"
 PROTOCOL_TAILING_Y34F = "无锡台铃Y34F协议"
+PROTOCOL_SHENZHOUXING = "神州行协议"
 PROTOCOL_YADEA = "雅迪协议"
 PROTOCOL_YOUYIBAO = "优仪宝一线通协议"
 PROTOCOL_JINGXIAN = "精显一线通协议"
@@ -35,6 +36,7 @@ SUPPORTED_PROTOCOLS = [
     PROTOCOL_WUXI_YIGE,
     PROTOCOL_TAILING_Y34B,
     PROTOCOL_TAILING_Y34F,
+    PROTOCOL_SHENZHOUXING,
     PROTOCOL_YADEA,
     PROTOCOL_YOUYIBAO,
     PROTOCOL_JINGXIAN,
@@ -128,6 +130,22 @@ class StatusBits:
     tailing_battery_over_current: bool = False
     tailing_battery_over_voltage: bool = False
     tailing_real_time_voltage_v: float = 48.0
+
+    # 神州行扩展状态
+    shenzhouxing_hdc: bool = False
+    shenzhouxing_hhc: bool = False
+    shenzhouxing_tcs: bool = False
+    shenzhouxing_brake_fault: bool = False
+    shenzhouxing_bluetooth: bool = False
+    shenzhouxing_time_display: bool = False
+    shenzhouxing_4g_signal_indicator: bool = False
+    shenzhouxing_position_indicator: bool = False
+    shenzhouxing_real_time_voltage_v: int = 48
+    shenzhouxing_signal_strength: int = 0
+    shenzhouxing_time_hour: int = 0
+    shenzhouxing_time_minute: int = 0
+    shenzhouxing_push_assist: bool = False
+    shenzhouxing_p_blink: bool = False
 
     # 运行数据
     current_a: int = 0
@@ -233,6 +251,8 @@ class ProtocolHandler:
 
         if protocol_name == PROTOCOL_BATTERY_SINGLE_WIRE:
             return 6
+        if protocol_name == PROTOCOL_SHENZHOUXING:
+            return 15
         if protocol_name == PROTOCOL_TAILING_Y34F:
             return 15
         if protocol_name == PROTOCOL_LUYUAN_BMS:
@@ -324,6 +344,7 @@ class ProtocolHandler:
             raise ValueError("精显协议序号起始值必须在 0-255 范围内")
         self._jingxian_sequence_counter = start_value
 
+
     def validate_status_bits(self, status: StatusBits) -> Tuple[bool, str]:
         """校验状态字段是否合法。"""
 
@@ -364,6 +385,15 @@ class ProtocolHandler:
         if not (0.0 <= status.tailing_real_time_voltage_v <= 6553.5):
             return False, "台铃实时电压必须在 0.0V 到 6553.5V 范围内"
 
+        if not (0 <= status.shenzhouxing_real_time_voltage_v <= 127):
+            return False, "神州行实时电压必须在 0V 到 127V 范围内"
+        if not (0 <= status.shenzhouxing_signal_strength <= 31):
+            return False, "神州行4G信号强度必须在 0-31 范围内"
+        if not (0 <= status.shenzhouxing_time_hour <= 23):
+            return False, "神州行时间小时必须在 0-23 范围内"
+        if not (0 <= status.shenzhouxing_time_minute <= 59):
+            return False, "神州行时间分钟必须在 0-59 范围内"
+
         voltage_mask_count = sum(
             1 for field_name, _ in VOLTAGE_OPTIONS if getattr(status, field_name, False)
         )
@@ -384,6 +414,11 @@ class ProtocolHandler:
             unsupported_voltage_fields = ("voltage_24v",)
             if any(getattr(status, field_name, False) for field_name in unsupported_voltage_fields):
                 return False, "台铃Y34协议的系统电压仅支持默认/36V/48V/60V/64V/72V/80V/84V/96V"
+
+        if protocol_name == PROTOCOL_SHENZHOUXING:
+            unsupported_voltage_fields = ("voltage_24v",)
+            if any(getattr(status, field_name, False) for field_name in unsupported_voltage_fields):
+                return False, "神州行协议的系统电压仅支持默认/36V/48V/60V/64V/72V/80V/84V/96V"
 
         if protocol_name == PROTOCOL_CHANGZHOU_XINSIWEI and not (
             0 <= status.xinsiwei_sequence <= 4095
@@ -524,6 +559,8 @@ class ProtocolHandler:
             return self._generate_tailing_y34b_frame(status)
         if protocol_name == PROTOCOL_TAILING_Y34F:
             return self._generate_tailing_y34f_frame(status)
+        if protocol_name == PROTOCOL_SHENZHOUXING:
+            return self._generate_shenzhouxing_frame(status)
         if protocol_name == PROTOCOL_YADEA:
             return self._generate_yadea_frame(status)
         if protocol_name == PROTOCOL_YOUYIBAO:
@@ -560,6 +597,8 @@ class ProtocolHandler:
             return self._generate_tailing_y34b_frame(status)
         if protocol_name == PROTOCOL_TAILING_Y34F:
             return self._generate_tailing_y34f_frame(status)
+        if protocol_name == PROTOCOL_SHENZHOUXING:
+            return self._generate_shenzhouxing_frame(status)
         if protocol_name == PROTOCOL_YADEA:
             return self._generate_yadea_frame(status)
         if protocol_name == PROTOCOL_YOUYIBAO:
@@ -777,6 +816,30 @@ class ProtocolHandler:
         frame[11] = self._encode_tailing_y34f_status11(status)
         frame[12] = (voltage_raw >> 8) & 0xFF
         frame[13] = voltage_raw & 0xFF
+        frame[14] = self._xor_checksum(frame[:14])
+        return True, frame, ""
+
+    def _generate_shenzhouxing_frame(self, status: StatusBits) -> Tuple[bool, List[int], str]:
+        is_valid, error_msg = self.validate_status_bits(status)
+        if not is_valid:
+            return False, [], error_msg
+
+        hall_count = self._resolve_hall_count(status)
+        frame = [0] * 15
+        frame[0] = 0x1F
+        frame[1] = 0xEE
+        frame[2] = self._encode_shenzhouxing_status1(status)
+        frame[3] = self._encode_shenzhouxing_status2(status)
+        frame[4] = self._encode_shenzhouxing_status3(status)
+        frame[5] = self._encode_shenzhouxing_status4(status)
+        frame[6] = self._encode_signed_current(status.current_a)
+        frame[7] = (hall_count >> 8) & 0xFF
+        frame[8] = hall_count & 0xFF
+        frame[9] = self._encode_shenzhouxing_status8(status)
+        frame[10] = self._encode_voltage_mask(status)
+        frame[11] = self._encode_shenzhouxing_data11(status)
+        frame[12] = self._encode_shenzhouxing_data12(status)
+        frame[13] = self._encode_shenzhouxing_data13(status)
         frame[14] = self._xor_checksum(frame[:14])
         return True, frame, ""
 
@@ -1246,6 +1309,96 @@ class ProtocolHandler:
         value |= self._encode_tailing_status11(status)
         return value
 
+    def _encode_shenzhouxing_status1(self, status: StatusBits) -> int:
+        value = 0
+        if status.side_stand:
+            value |= 0x08
+        if status.shenzhouxing_hdc:
+            value |= 0x04
+        if status.p_gear_protect:
+            value |= 0x02
+        if status.shenzhouxing_hhc:
+            value |= 0x01
+        return value
+
+    def _encode_shenzhouxing_status2(self, status: StatusBits) -> int:
+        value = 0
+        if status.shenzhouxing_tcs:
+            value |= 0x80
+        if status.hall_fault:
+            value |= 0x40
+        if status.throttle_fault:
+            value |= 0x20
+        if status.controller_fault:
+            value |= 0x10
+        if status.under_voltage:
+            value |= 0x08
+        if status.cruise:
+            value |= 0x04
+        if status.assist:
+            value |= 0x02
+        if status.motor_phase_loss:
+            value |= 0x01
+        return value
+
+    def _encode_shenzhouxing_status3(self, status: StatusBits) -> int:
+        value = 0
+        if status.gear_four:
+            value |= 0x80
+        if status.motor_running:
+            value |= 0x40
+        if status.shenzhouxing_brake_fault:
+            value |= 0x20
+        if status.controller_protect:
+            value |= 0x10
+        if status.regen_charging:
+            value |= 0x08
+        if status.anti_runaway:
+            value |= 0x04
+        value |= status.speed_mode & 0x03
+        return value
+
+    def _encode_shenzhouxing_status4(self, status: StatusBits) -> int:
+        value = 0
+        if status.shenzhouxing_bluetooth:
+            value |= 0x80
+        if status.shenzhouxing_time_display:
+            value |= 0x40
+        if status.shenzhouxing_4g_signal_indicator:
+            value |= 0x20
+        if status.shenzhouxing_position_indicator:
+            value |= 0x10
+        if status.stall_protect:
+            value |= 0x08
+        if status.reverse:
+            value |= 0x04
+        if status.brake:
+            value |= 0x02
+        if status.speed_limit:
+            value |= 0x01
+        return value
+
+    def _encode_shenzhouxing_status8(self, status: StatusBits) -> int:
+        if status.lithium_soc_mode:
+            return 0x80 | (status.soc_percent & 0x7F)
+        return status.shenzhouxing_real_time_voltage_v & 0x7F
+
+    def _encode_shenzhouxing_data11(self, status: StatusBits) -> int:
+        hour = status.shenzhouxing_time_hour & 0x1F
+        return ((status.shenzhouxing_signal_strength & 0x1F) << 3) | ((hour >> 2) & 0x07)
+
+    def _encode_shenzhouxing_data12(self, status: StatusBits) -> int:
+        hour = status.shenzhouxing_time_hour & 0x1F
+        return ((hour & 0x03) << 6) | (status.shenzhouxing_time_minute & 0x3F)
+
+    def _encode_shenzhouxing_data13(self, status: StatusBits) -> int:
+        value = 0
+        if status.shenzhouxing_push_assist:
+            value |= 0x80
+        if status.shenzhouxing_p_blink:
+            value |= 0x40
+        return value
+
     def _encode_ruilun_soc(self, status: StatusBits) -> int:
         if status.soc_fault:
             return 0xEE
@@ -1522,6 +1675,23 @@ class ProtocolHandler:
                 "DATA11 电压采集/团标电池故障/扩展状态",
                 "DATA12 实时电压高字节 (*10)",
                 "DATA13 实时电压低字节 (*10)",
+                "DATA14 校验和 (XOR)",
+            ],
+            PROTOCOL_SHENZHOUXING: [
+                "设备编码 (固定 0x1F)",
+                "流水号低8位 (固定 0xEE)",
+                "DATA2 流水号高4位+侧撑/HDC/P档/HHC",
+                "DATA3 TCS/故障/巡航/助力/缺相",
+                "DATA4 四档/运行/刹车故障/控制器保护/速度模式",
+                "DATA5 蓝牙/时间/4G/定位/堵转/倒车/刹车/限速",
+                "DATA6 运行电流",
+                "DATA7 速度高字节/500ms霍尔计数高字节",
+                "DATA8 速度低字节/500ms霍尔计数低字节",
+                "DATA9 锂电SOC/实时电压",
+                "DATA10 控制器额定工作电压",
+                "DATA11 4G信号强度+时间小时高3位",
+                "DATA12 时间小时低2位+时间分钟",
+                "DATA13 推车/P档闪烁",
                 "DATA14 校验和 (XOR)",
             ],
             PROTOCOL_YADEA: [
@@ -1966,6 +2136,70 @@ class PresetScenarios:
         status.tailing_speed_15kmh_warning = True
         status.tailing_brake_fault = True
         status.tailing_real_time_voltage_v = 65.8
+        return status
+
+    @staticmethod
+    def shenzhouxing_normal_running() -> StatusBits:
+        status = StatusBits(protocol_name=PROTOCOL_SHENZHOUXING)
+        status.voltage_48v = True
+        status.hall_count = 3000
+        status.soc_percent = 82
+        status.lithium_soc_mode = True
+        status.motor_running = True
+        status.current_a = 10
+        status.shenzhouxing_bluetooth = True
+        status.shenzhouxing_time_display = True
+        status.shenzhouxing_4g_signal_indicator = True
+        status.shenzhouxing_signal_strength = 18
+        status.shenzhouxing_time_hour = 14
+        status.shenzhouxing_time_minute = 35
+        return status
+
+    @staticmethod
+    def shenzhouxing_energy_recovery() -> StatusBits:
+        status = StatusBits(protocol_name=PROTOCOL_SHENZHOUXING)
+        status.voltage_60v = True
+        status.voltage_48v = False
+        status.hall_count = 2600
+        status.soc_percent = 68
+        status.lithium_soc_mode = True
+        status.regen_charging = True
+        status.current_a = -3
+        status.speed_mode = 2
+        status.shenzhouxing_tcs = True
+        status.shenzhouxing_time_display = True
+        status.shenzhouxing_4g_signal_indicator = True
+        status.shenzhouxing_position_indicator = True
+        status.shenzhouxing_signal_strength = 21
+        status.shenzhouxing_time_hour = 9
+        status.shenzhouxing_time_minute = 18
+        return status
+
+    @staticmethod
+    def shenzhouxing_fault_scenario() -> StatusBits:
+        status = StatusBits(protocol_name=PROTOCOL_SHENZHOUXING)
+        status.voltage_72v = True
+        status.voltage_48v = False
+        status.hall_count = 0
+        status.side_stand = True
+        status.shenzhouxing_hdc = True
+        status.p_gear_protect = True
+        status.shenzhouxing_hhc = True
+        status.shenzhouxing_tcs = True
+        status.hall_fault = True
+        status.controller_fault = True
+        status.under_voltage = True
+        status.shenzhouxing_brake_fault = True
+        status.controller_protect = True
+        status.anti_runaway = True
+        status.stall_protect = True
+        status.brake = True
+        status.speed_limit = True
+        status.shenzhouxing_signal_strength = 5
+        status.shenzhouxing_time_hour = 23
+        status.shenzhouxing_time_minute = 59
+        status.shenzhouxing_push_assist = True
+        status.shenzhouxing_p_blink = True
         return status
 
     @staticmethod

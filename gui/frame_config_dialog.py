@@ -7,8 +7,8 @@
 
 from typing import List
 
-from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QFont
+from PyQt5.QtCore import QRegExp, Qt, pyqtSignal
+from PyQt5.QtGui import QFont, QRegExpValidator
 from PyQt5.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -18,12 +18,15 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
+
+from protocol.frame_utils import normalize_frame
 
 
 class ByteEditor(QFrame):
@@ -38,8 +41,6 @@ class ByteEditor(QFrame):
 
     def init_ui(self, byte_value: int, description: str):
         layout = QVBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
         layout.setContentsMargins(8, 6, 8, 6)
         layout.setSpacing(4)
 
@@ -68,6 +69,9 @@ class ByteEditor(QFrame):
         hex_layout.addWidget(QLabel("HEX:"))
         self.hex_edit = QLineEdit()
         self.hex_edit.setMaxLength(2)
+        self.hex_edit.setValidator(
+            QRegExpValidator(QRegExp("[0-9A-Fa-f]{0,2}"), self.hex_edit)
+        )
         self.hex_edit.setFixedWidth(44)
         self.hex_edit.setAlignment(Qt.AlignCenter)
         self.hex_edit.setText(f"{byte_value:02X}")
@@ -183,7 +187,8 @@ class FrameConfigDialog(QDialog):
         if frame_length <= 0:
             frame_length = 12
 
-        self.frame_data = (initial_frame or ([0] * frame_length)).copy()
+        source_frame = initial_frame if initial_frame is not None else [0] * frame_length
+        self.frame_data = normalize_frame(source_frame, label="初始帧")
         self.byte_descriptions = byte_descriptions or self.default_byte_descriptions(frame_length)
         self.dialog_title = dialog_title or "协议帧详细配置"
         self.checksum_mode = checksum_mode
@@ -244,7 +249,7 @@ class FrameConfigDialog(QDialog):
         self.apply_btn = QPushButton("应用")
         self.apply_btn.clicked.connect(self.apply_changes)
         self.ok_btn = QPushButton("确定")
-        self.ok_btn.clicked.connect(self.accept)
+        self.ok_btn.clicked.connect(self._on_accept)
         self.cancel_btn = QPushButton("取消")
         self.cancel_btn.clicked.connect(self.reject)
 
@@ -377,14 +382,48 @@ class FrameConfigDialog(QDialog):
 
     def apply_changes(self):
         """应用修改。"""
+
+        try:
+            self._sync_frame_from_editors()
+        except (TypeError, ValueError) as exc:
+            QMessageBox.warning(self, "输入错误", f"请完整填写每个字节：{exc}")
+            return
         self.frameChanged.emit(self.frame_data.copy())
+
+    def _sync_frame_from_editors(self):
+        """把编辑器文本严格同步到帧模型。"""
+
+        edited_frame = [
+            int(editor.hex_edit.text().strip(), 16)
+            for editor in self.byte_editors
+        ]
+        self.frame_data = normalize_frame(
+            edited_frame,
+            expected_length=len(self.byte_editors),
+            label="帧数据",
+        )
+        self.update_frame_display()
+
+    def _on_accept(self):
+        """确认前同步所有编辑器，拒绝空白或非法十六进制输入。"""
+
+        try:
+            self._sync_frame_from_editors()
+        except (TypeError, ValueError) as exc:
+            QMessageBox.warning(self, "输入错误", f"请完整填写每个字节：{exc}")
+            return
+
+        self.accept()
 
     def set_frame_data(self, frame_data: List[int]):
         """设置帧数据。"""
-        self.frame_data = frame_data.copy()
+        self.frame_data = normalize_frame(
+            frame_data,
+            expected_length=len(self.byte_editors),
+            label="帧数据",
+        )
         for i, editor in enumerate(self.byte_editors):
-            if i < len(frame_data):
-                editor.set_value(frame_data[i])
+            editor.set_value(self.frame_data[i])
         self.update_frame_display()
 
     def get_frame_data(self) -> List[int]:

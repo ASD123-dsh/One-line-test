@@ -6,19 +6,18 @@
 实现串口配置、场景选择、Status位配置、发送控制、数据监控等功能区域
 """
 
-import sys
-import json
-import os
 from datetime import datetime
+from typing import Optional
+
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QGroupBox, QLabel, QComboBox, QPushButton, QSpinBox, QDoubleSpinBox,
     QCheckBox, QRadioButton, QButtonGroup, QTextEdit, QLineEdit,
     QMessageBox, QSplitter, QFrame, QScrollArea, QTabWidget,
-    QProgressBar, QStatusBar, QDialog, QToolButton
+    QStatusBar, QDialog, QToolButton
 )
 from PyQt5.QtCore import Qt, QTimer, pyqtSlot
-from PyQt5.QtGui import QFont, QIcon, QPalette, QColor
+from PyQt5.QtGui import QFont
 
 from protocol.protocol_handler import (
     PROTOCOL_BATTERY_SINGLE_WIRE,
@@ -39,19 +38,25 @@ from protocol.protocol_handler import (
     PROTOCOL_YADEA,
     PROTOCOL_YOUYIBAO,
     ProtocolHandler,
+    SUPPORTED_PROTOCOLS,
     StatusBits,
     PresetScenarios,
 )
+from protocol.definitions import DEFAULT_PROTOCOL_DEFINITION, PROTOCOL_DEFINITIONS
 from gui.feedback_dialog import FeedbackDialog
+from gui.protocol_ui_registry import get_protocol_ui_spec
 from serial_comm.serial_manager import SerialManager, SerialPortDetector
 from gui.frame_config_dialog import FrameConfigDialog
 from gui.packet_sequence_dialog import PacketSequenceDialog
 from licensing.activation import ActivationService
 
+MAX_HISTORY_BLOCKS = 10000
+
+
 class MainWindow(QMainWindow):
     """主窗口"""
     
-    def __init__(self, activation_service: ActivationService | None = None):
+    def __init__(self, activation_service: Optional[ActivationService] = None):
         super().__init__()
         self.activation_service = activation_service
         self.protocol_handler = ProtocolHandler()
@@ -106,7 +111,6 @@ class MainWindow(QMainWindow):
         content_layout.setSpacing(10)
         
         # 创建分割器
-        splitter = QSplitter(Qt.Horizontal)
         splitter = QSplitter(Qt.Horizontal)
         content_layout.addWidget(splitter)
         main_layout.addWidget(content_widget, 1)
@@ -370,27 +374,7 @@ class MainWindow(QMainWindow):
         protocol_layout = QHBoxLayout()
         protocol_layout.addWidget(QLabel("协议列表:"))
         self.protocol_combo = QComboBox()
-        self.protocol_combo.addItems(
-            [
-                PROTOCOL_RUILUN,
-                PROTOCOL_FZ_SIF,
-                PROTOCOL_XINRI,
-                PROTOCOL_HANGZHOU_ANXIAN,
-                PROTOCOL_CHANGZHOU_XINSIWEI,
-                PROTOCOL_WUXI_YIGE,
-                PROTOCOL_TAILING_Y34B,
-                PROTOCOL_TAILING_Y34F,
-                PROTOCOL_SHENZHOUXING,
-                PROTOCOL_YADEA,
-                PROTOCOL_YOUYIBAO,
-                PROTOCOL_JINGXIAN,
-                PROTOCOL_DONGWEI_GTXH,
-                PROTOCOL_XINCHI,
-                PROTOCOL_LUYUAN_BMS,
-                PROTOCOL_LITHIUM_BMS,
-                PROTOCOL_BATTERY_SINGLE_WIRE,
-            ]
-        )
+        self.protocol_combo.addItems(SUPPORTED_PROTOCOLS)
         self.protocol_combo.setCurrentText(PROTOCOL_RUILUN)
         self.protocol_combo.currentTextChanged.connect(self.on_protocol_changed)
         protocol_layout.addWidget(self.protocol_combo)
@@ -480,11 +464,6 @@ class MainWindow(QMainWindow):
             layout.setContentsMargins(8, 8, 8, 8)
             layout.setHorizontalSpacing(18)
             layout.setVerticalSpacing(6)
-        if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN:
-            layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-            layout.setContentsMargins(8, 8, 8, 8)
-            layout.setHorizontalSpacing(18)
-            layout.setVerticalSpacing(6)
         layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         
         protocol = self.current_protocol
@@ -496,6 +475,13 @@ class MainWindow(QMainWindow):
                 ("备用 (D3)", False),
                 ("协议限速 (D2)", True),
                 ("P档 (D1)", True),
+                ("备用 (D0)", False),
+            ]
+        elif protocol == PROTOCOL_XINRI:
+            labels = [
+                ("P档 (D3)", True),
+                ("低压报警 (D2)", True),
+                ("备用 (D1)", False),
                 ("备用 (D0)", False),
             ]
         elif protocol == PROTOCOL_DONGWEI_GTXH:
@@ -666,6 +652,17 @@ class MainWindow(QMainWindow):
             1 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 3,
             3 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 1,
         )
+
+        if self.current_protocol == PROTOCOL_XINRI:
+            # 新日 DATA3 仅定义 D6、D5、D4、D2，未定义位禁止操作。
+            self.status2_d7_cb.setText("备用 (D7)")
+            self.status2_d7_cb.setEnabled(False)
+            self.under_voltage_cb.setText("备用 (D3)")
+            self.under_voltage_cb.setEnabled(False)
+            self.assist_cb.setText("备用 (D1)")
+            self.assist_cb.setEnabled(False)
+            self.motor_phase_loss_cb.setText("备用 (D0)")
+            self.motor_phase_loss_cb.setEnabled(False)
         
         return widget
     
@@ -681,14 +678,19 @@ class MainWindow(QMainWindow):
 
         d7_text = (
             "速度模式高位 (D7)"
-            if self.current_protocol in {PROTOCOL_YADEA, PROTOCOL_JINGXIAN, PROTOCOL_DONGWEI_GTXH}
+            if self.current_protocol in {
+                PROTOCOL_XINRI,
+                PROTOCOL_YADEA,
+                PROTOCOL_JINGXIAN,
+                PROTOCOL_DONGWEI_GTXH,
+            }
             else "四档指示 (D7)"
         )
         speed_mode_label = (
             "档位模式 (D7+D1~D0):"
             if self.current_protocol == PROTOCOL_DONGWEI_GTXH
             else "速度模式 (D7+D1~D0):"
-            if self.current_protocol in {PROTOCOL_YADEA, PROTOCOL_JINGXIAN}
+            if self.current_protocol in {PROTOCOL_XINRI, PROTOCOL_YADEA, PROTOCOL_JINGXIAN}
             else "三速模式 (D1~D0):"
         )
 
@@ -712,7 +714,7 @@ class MainWindow(QMainWindow):
         )
         
         self.brake_cb = QCheckBox("刹车 (D5)")
-        if self.current_protocol == PROTOCOL_SHENZHOUXING:
+        if self.current_protocol in {PROTOCOL_XINRI, PROTOCOL_SHENZHOUXING}:
             self.brake_cb.setText("刹车故障 (D5)")
         layout.addWidget(self.brake_cb, 1, 0)
         
@@ -757,7 +759,12 @@ class MainWindow(QMainWindow):
         self.speed_mode_spin.setRange(
             0,
             7
-            if self.current_protocol in {PROTOCOL_YADEA, PROTOCOL_JINGXIAN, PROTOCOL_DONGWEI_GTXH}
+            if self.current_protocol in {
+                PROTOCOL_XINRI,
+                PROTOCOL_YADEA,
+                PROTOCOL_JINGXIAN,
+                PROTOCOL_DONGWEI_GTXH,
+            }
             else 3,
         )
         layout.addWidget(
@@ -765,6 +772,19 @@ class MainWindow(QMainWindow):
             2 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 3,
             2 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 1,
         )
+
+        if self.current_protocol == PROTOCOL_XINRI:
+            # 新日 DATA4 的 D7 由档位数值统一生成，避免两个控件互相冲突。
+            self.gear_four_cb.setText("速度模式高位由下方档位模式控制 (D7)")
+            self.gear_four_cb.setEnabled(False)
+            self.motor_running_cb.setText("备用 (D6)")
+            self.motor_running_cb.setEnabled(False)
+            self.controller_protect_cb.setText("备用 (D4)")
+            self.controller_protect_cb.setEnabled(False)
+            self.regen_charging_cb.setText("备用 (D3)")
+            self.regen_charging_cb.setEnabled(False)
+            self.anti_runaway_cb.setText("备用 (D2)")
+            self.anti_runaway_cb.setEnabled(False)
         
         return widget
     
@@ -899,6 +919,21 @@ class MainWindow(QMainWindow):
             1 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 3,
             3 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 1,
         )
+
+        if self.current_protocol == PROTOCOL_XINRI:
+            # 新日 DATA5 仅定义 D6（一键修复），其余位均按规格书保留。
+            self.current_70_flag_cb.setText("备用 (D7)")
+            self.current_70_flag_cb.setEnabled(False)
+            for checkbox, bit_name in (
+                (self.ekk_enable_cb, "D5"),
+                (self.over_current_cb, "D4"),
+                (self.stall_protect_cb, "D3"),
+                (self.reverse_cb, "D2"),
+                (self.electronic_brake_cb, "D1"),
+                (self.speed_limit_cb, "D0"),
+            ):
+                checkbox.setText(f"备用 ({bit_name})")
+                checkbox.setEnabled(False)
         
         return widget
     
@@ -921,19 +956,32 @@ class MainWindow(QMainWindow):
             "voltage_80v_rb",
             "voltage_84v_rb",
             "voltage_96v_rb",
+            "status8_label",
+            "soc_spin",
+            "lithium_soc_mode_cb",
         ):
             if hasattr(self, attr_name):
                 delattr(self, attr_name)
         
         # Status5 - 运行电流
-        current_label = (
-            "运行电流 (A，发送按 0.2A/LSB 编码):"
-            if protocol == PROTOCOL_DONGWEI_GTXH
-            else "运行电流 (A):"
-        )
+        if protocol == PROTOCOL_XINRI:
+            current_label = "运行电流幅值 (0~51.0A，0.2A/LSB):"
+        elif protocol == PROTOCOL_DONGWEI_GTXH:
+            current_label = "运行电流 (A，发送按 0.2A/LSB 编码):"
+        else:
+            current_label = "运行电流 (A):"
         layout.addWidget(QLabel(current_label), 0, 0)
-        self.current_spin = QSpinBox()
-        self.current_spin.setRange(-128, 127)
+        if protocol in {PROTOCOL_XINRI, PROTOCOL_DONGWEI_GTXH}:
+            self.current_spin = QDoubleSpinBox()
+            self.current_spin.setDecimals(1)
+            self.current_spin.setSingleStep(0.2)
+            if protocol == PROTOCOL_XINRI:
+                self.current_spin.setRange(0.0, 51.0)
+            else:
+                self.current_spin.setRange(-25.6, 25.4)
+        else:
+            self.current_spin = QSpinBox()
+            self.current_spin.setRange(-128, 127)
         self.current_spin.setValue(0)
         layout.addWidget(self.current_spin, 0, 1)
         
@@ -945,13 +993,20 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.hall_count_spin, 1, 1)
 
         # 兼容旧 UI 的速度兜底值
-        layout.addWidget(QLabel("兼容速度输入 (km/h，可留 0):"), 2, 0)
+        speed_label = QLabel("兼容速度输入 (km/h，可留 0):")
+        layout.addWidget(speed_label, 2, 0)
         self.speed_spin = QDoubleSpinBox()
         self.speed_spin.setRange(0.0, 6553.5)
         self.speed_spin.setDecimals(1)
         self.speed_spin.setSingleStep(0.1)
         self.speed_spin.setValue(0.0)
         layout.addWidget(self.speed_spin, 2, 1)
+
+        if protocol == PROTOCOL_XINRI:
+            # 新日 DATA9、DATA10 固定为 00，不提供无效的 SOC/电压控件。
+            speed_label.setText("备用 (DATA9/DATA10 固定为 00):")
+            self.speed_spin.setEnabled(False)
+            return widget
         
         if protocol == PROTOCOL_HANGZHOU_ANXIAN:
             status8_text = "电压百分比 (Status8):"
@@ -1235,6 +1290,7 @@ class MainWindow(QMainWindow):
         # 历史记录文本
         self.history_text = QTextEdit()
         self.history_text.setFont(QFont("Consolas", 8))
+        self.history_text.document().setMaximumBlockCount(MAX_HISTORY_BLOCKS)
         history_layout.addWidget(self.history_text)
         
         monitor_layout.addWidget(history_group)
@@ -1266,10 +1322,6 @@ class MainWindow(QMainWindow):
         
         # 串口检测器信号
         self.port_detector.ports_changed.connect(self.on_ports_changed)
-        
-        # Status位控件信号连接 - 实时更新当前帧数据
-        self._compact_status_tab_pages()
-        self.connect_status_signals()
     
     def connect_status_signals(self):
         """连接Status位控件信号，实现实时更新当前帧数据"""
@@ -1312,7 +1364,8 @@ class MainWindow(QMainWindow):
         self.current_spin.valueChanged.connect(self.update_current_frame_display)
         self.hall_count_spin.valueChanged.connect(self.update_current_frame_display)
         self.speed_spin.valueChanged.connect(self.update_current_frame_display)
-        self.soc_spin.valueChanged.connect(self.update_current_frame_display)
+        if getattr(self, "soc_spin", None) is not None:
+            self.soc_spin.valueChanged.connect(self.update_current_frame_display)
         if getattr(self, "lithium_soc_mode_cb", None) is not None:
             self.lithium_soc_mode_cb.toggled.connect(self.update_current_frame_display)
         if getattr(self, "soc_fault_cb", None) is not None:
@@ -1386,10 +1439,8 @@ class MainWindow(QMainWindow):
                 return
             
             baud_rate = int(self.baud_combo.currentText())
-            success, error_msg = self.serial_manager.connect_port(port_name, baud_rate)
-            
-            if not success:
-                QMessageBox.critical(self, "连接失败", error_msg)
+            # 连接错误统一由 connection_error 信号展示，避免同一错误弹窗两次。
+            self.serial_manager.connect_port(port_name, baud_rate)
     
     def _flush_history_updates(self):
         """批量刷新历史记录更新"""
@@ -1455,45 +1506,25 @@ class MainWindow(QMainWindow):
     @pyqtSlot(str)
     def on_protocol_changed(self, protocol_name):
         """协议切换处理"""
+        try:
+            ui_spec = get_protocol_ui_spec(protocol_name)
+        except ValueError as exc:
+            self.status_bar.showMessage(str(exc), 5000)
+            return
+
+        # 修复协议已切换、串口却继续循环发送旧帧的问题。
+        if self.serial_manager.is_cyclic_sending():
+            self.serial_manager.stop_cyclic_send()
+            self._reset_send_action_buttons()
+            self.send_status.setText("就绪")
+            self.send_status.setStyleSheet("color: blue; font-weight: bold;")
+
         self.current_protocol = protocol_name
         self.custom_frame_data = None
         self.apply_send_interval_constraints()
-        
-        # 根据协议类型切换Status配置界面
-        if protocol_name == PROTOCOL_RUILUN:
-            self.switch_to_ruilun_protocol()
-        elif protocol_name == PROTOCOL_FZ_SIF:
-            self.switch_to_fz_sif_protocol()
-        elif protocol_name == PROTOCOL_XINRI:
-            self.switch_to_xinri_protocol()
-        elif protocol_name == PROTOCOL_HANGZHOU_ANXIAN:
-            self.switch_to_hangzhou_anxian_protocol()
-        elif protocol_name == PROTOCOL_CHANGZHOU_XINSIWEI:
-            self.switch_to_changzhou_xinsiwei_protocol()
-        elif protocol_name == PROTOCOL_WUXI_YIGE:
-            self.switch_to_wuxi_yige_protocol()
-        elif protocol_name == PROTOCOL_TAILING_Y34B:
-            self.switch_to_tailing_y34b_protocol()
-        elif protocol_name == PROTOCOL_TAILING_Y34F:
-            self.switch_to_tailing_y34f_protocol()
-        elif protocol_name == PROTOCOL_SHENZHOUXING:
-            self.switch_to_shenzhouxing_protocol()
-        elif protocol_name == PROTOCOL_YADEA:
-            self.switch_to_yadea_protocol()
-        elif protocol_name == PROTOCOL_YOUYIBAO:
-            self.switch_to_youyibao_protocol()
-        elif protocol_name == PROTOCOL_JINGXIAN:
-            self.switch_to_jingxian_protocol()
-        elif protocol_name == PROTOCOL_DONGWEI_GTXH:
-            self.switch_to_dongwei_gtxh_protocol()
-        elif protocol_name == PROTOCOL_XINCHI:
-            self.switch_to_xinchi_protocol()
-        elif protocol_name == PROTOCOL_LUYUAN_BMS:
-            self.switch_to_luyuan_bms_protocol()
-        elif protocol_name == PROTOCOL_LITHIUM_BMS:
-            self.switch_to_lithium_bms_protocol()
-        elif protocol_name == PROTOCOL_BATTERY_SINGLE_WIRE:
-            self.switch_to_battery_single_wire_protocol()
+
+        # 协议界面入口由注册表统一路由，新增协议不再扩展条件分支。
+        getattr(self, ui_spec.switch_handler)()
         
         # 更新当前帧显示
         self.update_current_frame_display()
@@ -1522,7 +1553,7 @@ class MainWindow(QMainWindow):
         # 初始化新日协议的状态结构
         self.current_status = PresetScenarios.xinri_normal_running()
         
-        # 显示新日协议的Status配置界面
+        # 复用规格书字段化的通用 Status 页面，不再展示无编码映射的伪控件。
         self.show_xinri_status_config()
         
         # 重置为正常运行场景
@@ -1642,20 +1673,24 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "interval_spin"):
             return
 
-        if self.current_protocol == PROTOCOL_BATTERY_SINGLE_WIRE:
-            self.interval_spin.setRange(500, 5000)
-            self.interval_spin.setValue(500)
-            return
-
-        if self.current_protocol == PROTOCOL_XINCHI:
-            self.interval_spin.setRange(500, 5000)
-            self.interval_spin.setValue(500)
-            return
-
+        definition = PROTOCOL_DEFINITIONS.get(
+            self.current_protocol,
+            DEFAULT_PROTOCOL_DEFINITION,
+        )
         current_value = self.interval_spin.value()
-        self.interval_spin.setRange(500, 5000)
-        if not (500 <= current_value <= 5000):
-            self.interval_spin.setValue(500)
+        self.interval_spin.setRange(
+            definition.min_send_interval_ms,
+            definition.max_send_interval_ms,
+        )
+        if (
+            definition.reset_send_interval_on_switch
+            or not (
+                definition.min_send_interval_ms
+                <= current_value
+                <= definition.max_send_interval_ms
+            )
+        ):
+            self.interval_spin.setValue(definition.default_send_interval_ms)
 
     @pyqtSlot(int)
     def on_interval_changed(self, interval_ms):
@@ -1671,6 +1706,15 @@ class MainWindow(QMainWindow):
             self.send_status.setText(f"包组循环发送中... ({interval_ms} ms)")
         elif self.active_send_mode == "single":
             self.send_status.setText(f"循环发送中... ({interval_ms} ms)")
+
+    def _clear_status_tabs(self):
+        """移除并销毁旧协议标签页，避免反复切换协议时积累控件。"""
+
+        while self.status_tabs.count():
+            page = self.status_tabs.widget(0)
+            self.status_tabs.removeTab(0)
+            if page is not None:
+                page.deleteLater()
 
     def show_ruilun_status_config(self):
         """显示瑞轮协议Status配置界面"""
@@ -1695,7 +1739,7 @@ class MainWindow(QMainWindow):
                 delattr(self, attr_name)
 
         # 清除现有标签页
-        self.status_tabs.clear()
+        self._clear_status_tabs()
         
         # 添加瑞轮协议的标签页
         status1_tab = self.create_ruilun_status1_tab()
@@ -1724,7 +1768,7 @@ class MainWindow(QMainWindow):
     def show_changzhou_xinsiwei_status_config(self):
         """显示常州新思维协议Status配置界面"""
         # 清除现有标签页
-        self.status_tabs.clear()
+        self._clear_status_tabs()
         
         # 添加常州新思维协议的标签页
         status1_tab = self.create_xinsiwei_status1_tab()
@@ -1747,24 +1791,13 @@ class MainWindow(QMainWindow):
         self.connect_changzhou_xinsiwei_status_signals()
 
     def show_xinri_status_config(self):
-        """显示新日协议Status配置界面"""
-        # 清除现有标签页
-        self.status_tabs.clear()
-        
-        # 添加新日协议的标签页
-        self.status_tabs.addTab(self.create_xinri_vehicle_status_tab(), "车辆状态")
-        self.status_tabs.addTab(self.create_xinri_fault_status_tab(), "故障状态")
-        self.status_tabs.addTab(self.create_xinri_light_status_tab(), "灯光状态")
-        self.status_tabs.addTab(self.create_xinri_gear_status_tab(), "档位状态")
-        self.status_tabs.addTab(self.create_xinri_battery_status_tab(), "电池状态")
-        
-        # 重新连接信号
-        self._compact_status_tab_pages()
-        self.connect_xinri_status_signals()
+        """兼容旧入口，显示新日规格字段化的通用 Status 页面。"""
+
+        self.show_ruilun_status_config()
 
     def show_xinchi_status_config(self):
         """显示芯驰 BMS 协议配置界面。"""
-        self.status_tabs.clear()
+        self._clear_status_tabs()
         self.status_tabs.addTab(self.create_xinchi_status_flags_tab(), "BMS状态")
         self.status_tabs.addTab(self.create_xinchi_battery_data_tab(), "电池数据")
         self._compact_status_tab_pages()
@@ -1772,7 +1805,7 @@ class MainWindow(QMainWindow):
 
     def show_luyuan_bms_status_config(self):
         """显示绿源 BMS 一线通协议配置界面。"""
-        self.status_tabs.clear()
+        self._clear_status_tabs()
         self.status_tabs.addTab(self.create_luyuan_bms_status_flags_tab(), "BMS状态")
         self.status_tabs.addTab(self.create_luyuan_bms_battery_data_tab(), "电池数据")
         self._compact_status_tab_pages()
@@ -1780,7 +1813,7 @@ class MainWindow(QMainWindow):
 
     def show_lithium_bms_status_config(self):
         """显示一线通锂电池 BMS 协议配置界面。"""
-        self.status_tabs.clear()
+        self._clear_status_tabs()
         self.status_tabs.addTab(self.create_lithium_bms_status_flags_tab(), "故障状态")
         self.status_tabs.addTab(self.create_lithium_bms_battery_data_tab(), "电池数据")
         self._compact_status_tab_pages()
@@ -1788,7 +1821,7 @@ class MainWindow(QMainWindow):
 
     def show_battery_single_wire_status_config(self):
         """显示电池单线通讯协议配置界面。"""
-        self.status_tabs.clear()
+        self._clear_status_tabs()
         self.status_tabs.addTab(self.create_battery_single_wire_data_tab(), "电池数据")
         self._compact_status_tab_pages()
         self.connect_battery_single_wire_status_signals()
@@ -2429,56 +2462,9 @@ class MainWindow(QMainWindow):
         return widget
     
     def connect_xinri_status_signals(self):
-        """连接新日协议状态信号"""
-        # 车辆状态控件
-        self.xinri_power_on_cb.toggled.connect(self.update_current_frame_display)
-        self.xinri_motor_running_cb.toggled.connect(self.update_current_frame_display)
-        self.xinri_charging_cb.toggled.connect(self.update_current_frame_display)
-        self.xinri_brake_cb.toggled.connect(self.update_current_frame_display)
-        self.xinri_cruise_cb.toggled.connect(self.update_current_frame_display)
-        self.xinri_eco_mode_cb.toggled.connect(self.update_current_frame_display)
-        self.xinri_sport_mode_cb.toggled.connect(self.update_current_frame_display)
-        self.xinri_reverse_cb.toggled.connect(self.update_current_frame_display)
-        
-        # 故障状态控件
-        self.xinri_motor_fault_cb.toggled.connect(self.update_current_frame_display)
-        self.xinri_controller_fault_cb.toggled.connect(self.update_current_frame_display)
-        self.xinri_battery_fault_cb.toggled.connect(self.update_current_frame_display)
-        self.xinri_throttle_fault_cb.toggled.connect(self.update_current_frame_display)
-        self.xinri_brake_fault_cb.toggled.connect(self.update_current_frame_display)
-        self.xinri_hall_fault_cb.toggled.connect(self.update_current_frame_display)
-        self.xinri_over_temp_cb.toggled.connect(self.update_current_frame_display)
-        self.xinri_under_voltage_cb.toggled.connect(self.update_current_frame_display)
-        
-        # 灯光状态控件
-        self.xinri_headlight_cb.toggled.connect(self.update_current_frame_display)
-        self.xinri_taillight_cb.toggled.connect(self.update_current_frame_display)
-        self.xinri_left_turn_cb.toggled.connect(self.update_current_frame_display)
-        self.xinri_right_turn_cb.toggled.connect(self.update_current_frame_display)
-        self.xinri_hazard_cb.toggled.connect(self.update_current_frame_display)
-        self.xinri_brake_light_cb.toggled.connect(self.update_current_frame_display)
-        self.xinri_high_beam_cb.toggled.connect(self.update_current_frame_display)
-        self.xinri_low_beam_cb.toggled.connect(self.update_current_frame_display)
-        
-        # 档位状态控件
-        self.xinri_gear_p_cb.toggled.connect(self.update_current_frame_display)
-        self.xinri_gear_r_cb.toggled.connect(self.update_current_frame_display)
-        self.xinri_gear_n_cb.toggled.connect(self.update_current_frame_display)
-        self.xinri_gear_d_cb.toggled.connect(self.update_current_frame_display)
-        self.xinri_gear_1_cb.toggled.connect(self.update_current_frame_display)
-        self.xinri_gear_2_cb.toggled.connect(self.update_current_frame_display)
-        self.xinri_gear_3_cb.toggled.connect(self.update_current_frame_display)
-        self.xinri_gear_boost_cb.toggled.connect(self.update_current_frame_display)
-        
-        # 电池状态控件
-        self.xinri_battery_normal_cb.toggled.connect(self.update_current_frame_display)
-        self.xinri_battery_low_cb.toggled.connect(self.update_current_frame_display)
-        self.xinri_battery_critical_cb.toggled.connect(self.update_current_frame_display)
-        self.xinri_battery_charging_cb.toggled.connect(self.update_current_frame_display)
-        self.xinri_battery_full_cb.toggled.connect(self.update_current_frame_display)
-        self.xinri_battery_temp_high_cb.toggled.connect(self.update_current_frame_display)
-        self.xinri_battery_temp_low_cb.toggled.connect(self.update_current_frame_display)
-        self.xinri_battery_error_cb.toggled.connect(self.update_current_frame_display)
+        """兼容旧入口；通用页面在创建时已完成信号连接。"""
+
+        return None
 
     def connect_xinchi_status_signals(self):
         """连接芯驰 BMS 协议状态信号。"""
@@ -2620,7 +2606,7 @@ class MainWindow(QMainWindow):
     def show_hangzhou_anxian_status_config(self):
         """显示杭州安显协议Status配置界面"""
         # 清除现有标签页
-        self.status_tabs.clear()
+        self._clear_status_tabs()
         
         # 添加杭州安显协议的标签页（复用瑞轮协议的界面结构）
         status1_tab = self.create_ruilun_status1_tab()
@@ -2656,49 +2642,30 @@ class MainWindow(QMainWindow):
             self.frame_config_btn.setEnabled(True)
             
             frame_length = self.protocol_handler.get_protocol_frame_length(self.current_protocol)
-            if previous_scenario == 3 or self.custom_frame_data is None:
-                self.custom_frame_data = self._make_default_custom_frame()
-            elif len(self.custom_frame_data) != frame_length:
-                self.custom_frame_data = self._make_default_custom_frame()
+            needs_default_frame = (
+                previous_scenario == 3
+                or self.custom_frame_data is None
+                or len(self.custom_frame_data) != frame_length
+            )
+            if needs_default_frame:
+                try:
+                    self.custom_frame_data = self._make_default_custom_frame()
+                except ValueError as exc:
+                    self.custom_frame_data = None
+                    self.frame_config_btn.setEnabled(False)
+                    QMessageBox.critical(self, "帧生成失败", str(exc))
+                    return
         else:
             self.status_tabs.setEnabled(False)
             self.frame_config_btn.setEnabled(False)
             
-            # 根据当前协议加载预设场景
-            if self.current_protocol == PROTOCOL_RUILUN:
-                self.load_ruilun_preset_scenario(scenario_id)
-            elif self.current_protocol == PROTOCOL_FZ_SIF:
-                self.load_fz_sif_preset_scenario(scenario_id)
-            elif self.current_protocol == PROTOCOL_XINRI:
-                self.load_xinri_preset_scenario(scenario_id)
-            elif self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN:
-                self.load_hangzhou_anxian_preset_scenario(scenario_id)
-            elif self.current_protocol == PROTOCOL_CHANGZHOU_XINSIWEI:
-                self.load_changzhou_xinsiwei_preset_scenario(scenario_id)
-            elif self.current_protocol == PROTOCOL_WUXI_YIGE:
-                self.load_wuxi_yige_preset_scenario(scenario_id)
-            elif self.current_protocol == PROTOCOL_TAILING_Y34B:
-                self.load_tailing_y34b_preset_scenario(scenario_id)
-            elif self.current_protocol == PROTOCOL_TAILING_Y34F:
-                self.load_tailing_y34f_preset_scenario(scenario_id)
-            elif self.current_protocol == PROTOCOL_SHENZHOUXING:
-                self.load_shenzhouxing_preset_scenario(scenario_id)
-            elif self.current_protocol == PROTOCOL_YADEA:
-                self.load_yadea_preset_scenario(scenario_id)
-            elif self.current_protocol == PROTOCOL_YOUYIBAO:
-                self.load_youyibao_preset_scenario(scenario_id)
-            elif self.current_protocol == PROTOCOL_JINGXIAN:
-                self.load_jingxian_preset_scenario(scenario_id)
-            elif self.current_protocol == PROTOCOL_DONGWEI_GTXH:
-                self.load_dongwei_gtxh_preset_scenario(scenario_id)
-            elif self.current_protocol == PROTOCOL_XINCHI:
-                self.load_xinchi_preset_scenario(scenario_id)
-            elif self.current_protocol == PROTOCOL_LUYUAN_BMS:
-                self.load_luyuan_bms_preset_scenario(scenario_id)
-            elif self.current_protocol == PROTOCOL_LITHIUM_BMS:
-                self.load_lithium_bms_preset_scenario(scenario_id)
-            elif self.current_protocol == PROTOCOL_BATTERY_SINGLE_WIRE:
-                self.load_battery_single_wire_preset_scenario(scenario_id)
+            try:
+                ui_spec = get_protocol_ui_spec(self.current_protocol)
+            except ValueError as exc:
+                self.status_bar.showMessage(str(exc), 5000)
+                return
+
+            getattr(self, ui_spec.preset_loader)(scenario_id)
         
         # 记录当前场景ID，用于下次切换时判断
         self._previous_scenario_id = scenario_id
@@ -2742,7 +2709,7 @@ class MainWindow(QMainWindow):
             # 自定义场景，初始化为空StatusBits对象
             self.current_status = StatusBits()
         
-        # 更新UI显示
+        # 更新 UI 显示
         self.update_xinri_ui_from_status()
     
     def load_hangzhou_anxian_preset_scenario(self, scenario_id):
@@ -3026,7 +2993,12 @@ class MainWindow(QMainWindow):
         
         status = self.current_status
 
-        if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN:
+        if self.current_protocol == PROTOCOL_XINRI:
+            self.distance_mode_cb.setChecked(getattr(status, "p_gear_protect", False))
+            self.speed_alarm_cb.setChecked(getattr(status, "low_voltage_alarm", False))
+            self.p_gear_protect_cb.setChecked(False)
+            self.tcs_status_cb.setChecked(False)
+        elif self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN:
             self.distance_mode_cb.setChecked(False)
             self.speed_alarm_cb.setChecked(getattr(status, "protocol_speed_limit", False))
             self.p_gear_protect_cb.setChecked(getattr(status, "p_gear_protect", False))
@@ -3153,10 +3125,15 @@ class MainWindow(QMainWindow):
         self.current_spin.setValue(getattr(status, "current_a", 0))
         self.hall_count_spin.setValue(getattr(status, "hall_count", 0))
         self.speed_spin.setValue(getattr(status, "speed_kmh", 0.0))
-        if self.current_protocol in {PROTOCOL_HANGZHOU_ANXIAN, PROTOCOL_FZ_SIF, PROTOCOL_JINGXIAN}:
-            self.soc_spin.setValue(getattr(status, "voltage_percentage", 0))
-        else:
-            self.soc_spin.setValue(getattr(status, "soc_percent", 0))
+        if getattr(self, "soc_spin", None) is not None:
+            if self.current_protocol in {
+                PROTOCOL_HANGZHOU_ANXIAN,
+                PROTOCOL_FZ_SIF,
+                PROTOCOL_JINGXIAN,
+            }:
+                self.soc_spin.setValue(getattr(status, "voltage_percentage", 0))
+            else:
+                self.soc_spin.setValue(getattr(status, "soc_percent", 0))
 
         if getattr(self, "lithium_soc_mode_cb", None) is not None:
             self.lithium_soc_mode_cb.setChecked(getattr(status, "lithium_soc_mode", True))
@@ -3229,101 +3206,9 @@ class MainWindow(QMainWindow):
             self.shenzhouxing_p_blink_cb.setChecked(getattr(status, "shenzhouxing_p_blink", False))
     
     def update_xinri_ui_from_status(self):
-        """根据新日协议状态更新UI显示"""
-        if not hasattr(self, 'current_status') or not isinstance(self.current_status, StatusBits):
-            return
-        
-        status = self.current_status
-        
-        # 更新车辆状态 - 映射到StatusBits对应的属性
-        if hasattr(self, 'xinri_power_on_cb'):
-            self.xinri_power_on_cb.setChecked(getattr(status, 'power_on', False))
-        if hasattr(self, 'xinri_motor_running_cb'):
-            self.xinri_motor_running_cb.setChecked(getattr(status, 'motor_running', False))
-        if hasattr(self, 'xinri_charging_cb'):
-            self.xinri_charging_cb.setChecked(getattr(status, 'regen_charging', False))
-        if hasattr(self, 'xinri_brake_cb'):
-            self.xinri_brake_cb.setChecked(getattr(status, 'brake', False))
-        if hasattr(self, 'xinri_cruise_cb'):
-            self.xinri_cruise_cb.setChecked(getattr(status, 'cruise', False))
-        if hasattr(self, 'xinri_eco_mode_cb'):
-            self.xinri_eco_mode_cb.setChecked(getattr(status, 'eco_mode', False))
-        if hasattr(self, 'xinri_sport_mode_cb'):
-            self.xinri_sport_mode_cb.setChecked(getattr(status, 'sport_mode', False))
-        if hasattr(self, 'xinri_reverse_cb'):
-            self.xinri_reverse_cb.setChecked(getattr(status, 'reverse', False))
-        
-        # 更新故障状态
-        if hasattr(self, 'xinri_motor_fault_cb'):
-            self.xinri_motor_fault_cb.setChecked(getattr(status, 'motor_fault', False))
-        if hasattr(self, 'xinri_controller_fault_cb'):
-            self.xinri_controller_fault_cb.setChecked(getattr(status, 'controller_fault', False))
-        if hasattr(self, 'xinri_battery_fault_cb'):
-            self.xinri_battery_fault_cb.setChecked(getattr(status, 'battery_fault', False))
-        if hasattr(self, 'xinri_throttle_fault_cb'):
-            self.xinri_throttle_fault_cb.setChecked(getattr(status, 'throttle_fault', False))
-        if hasattr(self, 'xinri_brake_fault_cb'):
-            self.xinri_brake_fault_cb.setChecked(getattr(status, 'brake_fault', False))
-        if hasattr(self, 'xinri_hall_fault_cb'):
-            self.xinri_hall_fault_cb.setChecked(getattr(status, 'hall_fault', False))
-        if hasattr(self, 'xinri_over_temp_cb'):
-            self.xinri_over_temp_cb.setChecked(getattr(status, 'over_temp', False))
-        if hasattr(self, 'xinri_under_voltage_cb'):
-            self.xinri_under_voltage_cb.setChecked(getattr(status, 'under_voltage', False))
-        
-        # 更新灯光状态
-        if hasattr(self, 'xinri_headlight_cb'):
-            self.xinri_headlight_cb.setChecked(getattr(status, 'headlight', False))
-        if hasattr(self, 'xinri_taillight_cb'):
-            self.xinri_taillight_cb.setChecked(getattr(status, 'taillight', False))
-        if hasattr(self, 'xinri_left_turn_cb'):
-            self.xinri_left_turn_cb.setChecked(getattr(status, 'left_turn', False))
-        if hasattr(self, 'xinri_right_turn_cb'):
-            self.xinri_right_turn_cb.setChecked(getattr(status, 'right_turn', False))
-        if hasattr(self, 'xinri_hazard_cb'):
-            self.xinri_hazard_cb.setChecked(getattr(status, 'hazard', False))
-        if hasattr(self, 'xinri_brake_light_cb'):
-            self.xinri_brake_light_cb.setChecked(getattr(status, 'brake_light', False))
-        if hasattr(self, 'xinri_high_beam_cb'):
-            self.xinri_high_beam_cb.setChecked(getattr(status, 'high_beam', False))
-        if hasattr(self, 'xinri_low_beam_cb'):
-            self.xinri_low_beam_cb.setChecked(getattr(status, 'low_beam', False))
-        
-        # 更新档位状态
-        if hasattr(self, 'xinri_gear_p_cb'):
-            self.xinri_gear_p_cb.setChecked(getattr(status, 'p_gear_protect', False))
-        if hasattr(self, 'xinri_gear_r_cb'):
-            self.xinri_gear_r_cb.setChecked(getattr(status, 'reverse', False))
-        if hasattr(self, 'xinri_gear_n_cb'):
-            self.xinri_gear_n_cb.setChecked(getattr(status, 'neutral', False))
-        if hasattr(self, 'xinri_gear_d_cb'):
-            self.xinri_gear_d_cb.setChecked(getattr(status, 'drive', False))
-        if hasattr(self, 'xinri_gear_1_cb'):
-            self.xinri_gear_1_cb.setChecked(getattr(status, 'gear_1', False))
-        if hasattr(self, 'xinri_gear_2_cb'):
-            self.xinri_gear_2_cb.setChecked(getattr(status, 'gear_2', False))
-        if hasattr(self, 'xinri_gear_3_cb'):
-            self.xinri_gear_3_cb.setChecked(getattr(status, 'gear_3', False))
-        if hasattr(self, 'xinri_gear_boost_cb'):
-            self.xinri_gear_boost_cb.setChecked(getattr(status, 'boost_mode', False))
-        
-        # 更新电池状态
-        if hasattr(self, 'xinri_battery_normal_cb'):
-            self.xinri_battery_normal_cb.setChecked(getattr(status, 'battery_normal', False))
-        if hasattr(self, 'xinri_battery_low_cb'):
-            self.xinri_battery_low_cb.setChecked(getattr(status, 'battery_low', False))
-        if hasattr(self, 'xinri_battery_critical_cb'):
-            self.xinri_battery_critical_cb.setChecked(getattr(status, 'battery_critical', False))
-        if hasattr(self, 'xinri_battery_charging_cb'):
-            self.xinri_battery_charging_cb.setChecked(getattr(status, 'regen_charging', False))
-        if hasattr(self, 'xinri_battery_full_cb'):
-            self.xinri_battery_full_cb.setChecked(getattr(status, 'battery_full', False))
-        if hasattr(self, 'xinri_battery_temp_high_cb'):
-            self.xinri_battery_temp_high_cb.setChecked(getattr(status, 'battery_temp_high', False))
-        if hasattr(self, 'xinri_battery_temp_low_cb'):
-            self.xinri_battery_temp_low_cb.setChecked(getattr(status, 'battery_temp_low', False))
-        if hasattr(self, 'xinri_battery_error_cb'):
-            self.xinri_battery_error_cb.setChecked(getattr(status, 'battery_error', False))
+        """兼容旧入口，使用新日规格字段化的通用状态映射。"""
+
+        self.update_ruilun_ui_from_status()
 
     def update_xinchi_ui_from_status(self):
         """根据芯驰 BMS 协议状态更新 UI。"""
@@ -3481,20 +3366,8 @@ class MainWindow(QMainWindow):
     
     def get_current_status_from_ui(self) -> StatusBits:
         """从UI获取当前Status位配置，统一返回StatusBits对象"""
-        if self.current_protocol == PROTOCOL_XINRI:
-            return self.get_xinri_status_from_ui()
-        elif self.current_protocol == PROTOCOL_CHANGZHOU_XINSIWEI:
-            return self.get_changzhou_xinsiwei_status_from_ui()
-        elif self.current_protocol == PROTOCOL_XINCHI:
-            return self.get_xinchi_status_from_ui()
-        elif self.current_protocol == PROTOCOL_LUYUAN_BMS:
-            return self.get_luyuan_bms_status_from_ui()
-        elif self.current_protocol == PROTOCOL_LITHIUM_BMS:
-            return self.get_lithium_bms_status_from_ui()
-        elif self.current_protocol == PROTOCOL_BATTERY_SINGLE_WIRE:
-            return self.get_battery_single_wire_status_from_ui()
-        else:
-            return self.get_ruilun_status_from_ui()
+        ui_spec = get_protocol_ui_spec(self.current_protocol)
+        return getattr(self, ui_spec.status_reader)()
     
     def get_ruilun_status_from_ui(self) -> StatusBits:
         """从UI获取瑞伦协议的Status位配置"""
@@ -3502,7 +3375,10 @@ class MainWindow(QMainWindow):
         status.protocol_name = self.current_protocol
         
         # Status1
-        if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN:
+        if self.current_protocol == PROTOCOL_XINRI:
+            status.p_gear_protect = self.distance_mode_cb.isChecked()
+            status.low_voltage_alarm = self.speed_alarm_cb.isChecked()
+        elif self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN:
             status.protocol_speed_limit = self.speed_alarm_cb.isChecked()
             status.p_gear_protect = self.p_gear_protect_cb.isChecked()
         elif self.current_protocol == PROTOCOL_FZ_SIF:
@@ -3616,10 +3492,15 @@ class MainWindow(QMainWindow):
         status.current_a = self.current_spin.value()
         status.hall_count = self.hall_count_spin.value()
         status.speed_kmh = self.speed_spin.value()
-        if self.current_protocol in {PROTOCOL_HANGZHOU_ANXIAN, PROTOCOL_FZ_SIF, PROTOCOL_JINGXIAN}:
-            status.voltage_percentage = self.soc_spin.value()
-        else:
-            status.soc_percent = self.soc_spin.value()
+        if getattr(self, "soc_spin", None) is not None:
+            if self.current_protocol in {
+                PROTOCOL_HANGZHOU_ANXIAN,
+                PROTOCOL_FZ_SIF,
+                PROTOCOL_JINGXIAN,
+            }:
+                status.voltage_percentage = self.soc_spin.value()
+            else:
+                status.soc_percent = self.soc_spin.value()
         if getattr(self, "lithium_soc_mode_cb", None) is not None:
             status.lithium_soc_mode = self.lithium_soc_mode_cb.isChecked()
         if getattr(self, "soc_fault_cb", None) is not None:
@@ -3697,50 +3578,9 @@ class MainWindow(QMainWindow):
         return status
     
     def get_xinri_status_from_ui(self) -> StatusBits:
-        """从UI获取新日协议的Status位配置"""
-        status = StatusBits()
-        status.protocol_name = PROTOCOL_XINRI
-        
-        # 车辆状态映射
-        if hasattr(self, 'xinri_motor_running_cb'):
-            status.motor_running = self.xinri_motor_running_cb.isChecked()
-        if hasattr(self, 'xinri_brake_cb'):
-            status.brake = self.xinri_brake_cb.isChecked()
-        if hasattr(self, 'xinri_cruise_cb'):
-            status.cruise = self.xinri_cruise_cb.isChecked()
-        
-        # 故障状态映射
-        if hasattr(self, 'xinri_motor_fault_cb') and self.xinri_motor_fault_cb.isChecked():
-            status.hall_fault = True
-        if hasattr(self, 'xinri_hall_fault_cb'):
-            status.hall_fault = status.hall_fault or self.xinri_hall_fault_cb.isChecked()
-        if hasattr(self, 'xinri_controller_fault_cb'):
-            status.controller_fault = self.xinri_controller_fault_cb.isChecked()
-        if hasattr(self, 'xinri_throttle_fault_cb'):
-            status.throttle_fault = self.xinri_throttle_fault_cb.isChecked()
-        if hasattr(self, 'xinri_under_voltage_cb'):
-            status.low_voltage_alarm = self.xinri_under_voltage_cb.isChecked()
-        
-        # 档位状态映射
-        if hasattr(self, 'xinri_gear_p_cb'):
-            status.p_gear_protect = self.xinri_gear_p_cb.isChecked()
-        if hasattr(self, 'xinri_gear_boost_cb') and self.xinri_gear_boost_cb.isChecked():
-            status.speed_mode = 4
-        elif hasattr(self, 'xinri_gear_3_cb') and self.xinri_gear_3_cb.isChecked():
-            status.speed_mode = 3
-        elif hasattr(self, 'xinri_gear_2_cb') and self.xinri_gear_2_cb.isChecked():
-            status.speed_mode = 2
-        elif hasattr(self, 'xinri_gear_1_cb') and self.xinri_gear_1_cb.isChecked():
-            status.speed_mode = 1
-        else:
-            status.speed_mode = 0
-        
-        # 设置默认值（新日协议当前 UI 未提供原始电流/霍尔计数，保持 0）
-        status.voltage_48v = False
-        status.speed_kmh = 0.0
-        status.soc_percent = 0
-        
-        return status
+        """兼容旧入口，读取新日规格字段化的通用状态页面。"""
+
+        return self.get_ruilun_status_from_ui()
 
     def get_xinchi_status_from_ui(self) -> StatusBits:
         """从 UI 获取芯驰 BMS 协议配置。"""
@@ -4075,8 +3915,16 @@ class MainWindow(QMainWindow):
             # 开始循环发送
             interval_ms = self.interval_spin.value()
             send_mode = self.protocol_handler.get_protocol_send_mode(self.current_protocol)
+            definition = PROTOCOL_DEFINITIONS.get(
+                self.current_protocol,
+                DEFAULT_PROTOCOL_DEFINITION,
+            )
             success, error_msg = self.serial_manager.start_cyclic_send(
-                frame_data, interval_ms, send_mode=send_mode
+                frame_data,
+                interval_ms,
+                send_mode=send_mode,
+                min_interval_ms=definition.min_send_interval_ms,
+                max_interval_ms=definition.max_send_interval_ms,
             )
             
             if success:
@@ -4110,10 +3958,14 @@ class MainWindow(QMainWindow):
     def open_packet_sequence_config(self):
         frame_length = self.protocol_handler.get_protocol_frame_length(self.current_protocol)
         current_frames = self.packet_sequence_frames.get(self.current_protocol)
-        if not current_frames:
-            current_frames = [self._make_default_custom_frame()]
-        elif any(len(frame) != frame_length for frame in current_frames):
-            current_frames = [self._make_default_custom_frame()]
+        try:
+            if not current_frames:
+                current_frames = [self._make_default_custom_frame()]
+            elif any(len(frame) != frame_length for frame in current_frames):
+                current_frames = [self._make_default_custom_frame()]
+        except ValueError as exc:
+            QMessageBox.critical(self, "帧生成失败", str(exc))
+            return
 
         byte_descriptions = self.protocol_handler.get_byte_descriptions(self.current_protocol)
         dialog = PacketSequenceDialog(
@@ -4140,15 +3992,27 @@ class MainWindow(QMainWindow):
             self.serial_manager.stop_cyclic_send()
             self._reset_send_action_buttons()
 
-        frame_sequence = self._get_packet_sequence_frames()
+        try:
+            frame_sequence = self._get_packet_sequence_frames()
+        except ValueError as exc:
+            QMessageBox.critical(self, "帧生成失败", str(exc))
+            return
         if not frame_sequence:
             QMessageBox.warning(self, "数据错误", "请先配置包组数据")
             return
 
         interval_ms = self.interval_spin.value()
         send_mode = self.protocol_handler.get_protocol_send_mode(self.current_protocol)
+        definition = PROTOCOL_DEFINITIONS.get(
+            self.current_protocol,
+            DEFAULT_PROTOCOL_DEFINITION,
+        )
         success, error_msg = self.serial_manager.start_cyclic_send_sequence(
-            frame_sequence, interval_ms, send_mode=send_mode
+            frame_sequence,
+            interval_ms,
+            send_mode=send_mode,
+            min_interval_ms=definition.min_send_interval_ms,
+            max_interval_ms=definition.max_send_interval_ms,
         )
         if success:
             self.active_send_mode = "sequence"
@@ -4190,11 +4054,11 @@ class MainWindow(QMainWindow):
         # 停止循环发送
         if self.serial_manager.is_cyclic_sending():
             self.serial_manager.stop_cyclic_send()
-            self.active_send_mode = None
-            self.packet_sequence_send_btn.setText("包组循环")
-            self.cyclic_send_btn.setText("循环发送")
-            self.send_status.setText("发送失败")
-            self.send_status.setStyleSheet("color: red; font-weight: bold;")
+
+        # 即使串口异常已先停止定时器，也要保留最终失败状态。
+        self._reset_send_action_buttons()
+        self.send_status.setText("发送失败")
+        self.send_status.setStyleSheet("color: red; font-weight: bold;")
     
     @pyqtSlot(str)
     def on_connection_error(self, error_msg):
@@ -4216,14 +4080,22 @@ class MainWindow(QMainWindow):
         if self.custom_radio.isChecked():
             try:
                 status = self.get_current_status_from_ui()
-            except Exception:
-                status = self.current_status
+            except Exception as exc:
+                raise ValueError(f"读取当前协议配置失败：{exc}") from exc
 
-        success, frame_data, _ = self.generate_protocol_frame_for_preview(status)
-        if success and len(frame_data) == frame_length:
-            return frame_data
+        try:
+            success, frame_data, error_msg = self.generate_protocol_frame_for_preview(status)
+        except Exception as exc:
+            raise ValueError(f"生成当前协议帧失败：{exc}") from exc
 
-        return [0] * frame_length
+        if not success:
+            raise ValueError(error_msg or "生成当前协议帧失败")
+        if len(frame_data) != frame_length:
+            raise ValueError(
+                f"生成帧长度错误：期望 {frame_length} 字节，实际 {len(frame_data)} 字节"
+            )
+
+        return frame_data
     
     @pyqtSlot()
     def open_frame_config(self):
@@ -4231,7 +4103,11 @@ class MainWindow(QMainWindow):
         frame_length = self.protocol_handler.get_protocol_frame_length(self.current_protocol)
 
         if self.custom_frame_data is None or len(self.custom_frame_data) != frame_length:
-            self.custom_frame_data = self._make_default_custom_frame()
+            try:
+                self.custom_frame_data = self._make_default_custom_frame()
+            except ValueError as exc:
+                QMessageBox.critical(self, "帧生成失败", str(exc))
+                return
         
         byte_descriptions = self.protocol_handler.get_byte_descriptions(self.current_protocol)
         self.frame_config_dialog = FrameConfigDialog(

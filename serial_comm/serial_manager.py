@@ -1,24 +1,39 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Serial communication management.
-"""
+"""串口通信、循环发送和自定义 SIF 波形管理。"""
 
 import ctypes
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Optional, Tuple
 
 import serial
 import serial.tools.list_ports
-import time
 from PyQt5.QtCore import QObject, QTimer, pyqtSignal
+
+from protocol.frame_utils import normalize_frame
 
 
 SEND_MODE_UART = "uart"
 SEND_MODE_BATTERY_SINGLE_WIRE = "battery_single_wire"
 SEND_MODE_LUYUAN_BMS_SIF = "luyuan_bms_sif"
 SEND_MODE_JINGXIAN_SIF = "jingxian_sif"
+SUPPORTED_SEND_MODES = frozenset(
+    {
+        SEND_MODE_UART,
+        SEND_MODE_BATTERY_SINGLE_WIRE,
+        SEND_MODE_LUYUAN_BMS_SIF,
+        SEND_MODE_JINGXIAN_SIF,
+    }
+)
+SEND_MODE_FRAME_LENGTHS = {
+    SEND_MODE_BATTERY_SINGLE_WIRE: 6,
+    SEND_MODE_LUYUAN_BMS_SIF: 15,
+    SEND_MODE_JINGXIAN_SIF: 12,
+}
+MIN_SEND_INTERVAL_MS = 500
+MAX_SEND_INTERVAL_MS = 5000
 
 
 @dataclass
@@ -29,6 +44,19 @@ class SerialPortInfo:
 
     def __str__(self) -> str:
         return f"{self.port} ({self.description})"
+
+
+def _enumerate_serial_ports() -> List[SerialPortInfo]:
+    """枚举系统串口并转换为统一的数据对象。"""
+
+    return [
+        SerialPortInfo(
+            port=port_info.device,
+            description=port_info.description,
+            hwid=port_info.hwid or "",
+        )
+        for port_info in serial.tools.list_ports.comports()
+    ]
 
 
 class SerialManager(QObject):
@@ -42,7 +70,7 @@ class SerialManager(QObject):
         super().__init__()
         self.serial_port: Optional[serial.Serial] = None
         self.is_connected = False
-        self.send_timer = QTimer()
+        self.send_timer = QTimer(self)
         self.send_timer.timeout.connect(self._send_cyclic_data)
 
         self.cyclic_data: Optional[List[int]] = None
@@ -50,33 +78,41 @@ class SerialManager(QObject):
         self.cyclic_frame_index = 0
         self.cyclic_send_mode = SEND_MODE_UART
         self.send_interval_ms = 500
+        self.cyclic_min_interval_ms = MIN_SEND_INTERVAL_MS
+        self.cyclic_max_interval_ms = MAX_SEND_INTERVAL_MS
         self.tosc_us = 100
 
         self.send_count = 0
         self.ui_update_interval = 10
 
     def scan_ports(self) -> List[SerialPortInfo]:
-        ports: List[SerialPortInfo] = []
+        """返回当前可用串口；枚举失败时保持 UI 可用并返回空列表。"""
+
         try:
-            for port_info in serial.tools.list_ports.comports():
-                ports.append(
-                    SerialPortInfo(
-                        port=port_info.device,
-                        description=port_info.description,
-                        hwid=port_info.hwid or "",
-                    )
-                )
+            return _enumerate_serial_ports()
         except Exception:
-            pass
-        return ports
+            return []
 
     def connect_port(self, port_name: str, baud_rate: int = 9600) -> Tuple[bool, str]:
+        """连接指定串口，并确保失败后不会遗留假连接状态。"""
+
+        if not isinstance(port_name, str) or not port_name.strip():
+            error_msg = "串口名称不能为空"
+            self.connection_error.emit(error_msg)
+            return False, error_msg
+        if isinstance(baud_rate, bool) or not isinstance(baud_rate, int) or baud_rate <= 0:
+            error_msg = "波特率必须是正整数"
+            self.connection_error.emit(error_msg)
+            return False, error_msg
+
         try:
-            if self.is_connected:
-                self.disconnect_port()
+            if self.is_connected and not self.disconnect_port():
+                error_msg = "原串口未能安全断开，请重试"
+                self.connection_error.emit(error_msg)
+                return False, error_msg
 
             self.serial_port = serial.Serial(
-                port=port_name,
+                port=port_name.strip(),
                 baudrate=baud_rate,
                 bytesize=serial.EIGHTBITS,
                 parity=serial.PARITY_NONE,
@@ -87,33 +123,74 @@ class SerialManager(QObject):
 
             if self.serial_port.is_open:
                 self.is_connected = True
-                self.port_connected.emit(port_name)
+                self.port_connected.emit(port_name.strip())
                 return True, ""
-            return False, "串口打开失败"
+
+            self.serial_port.close()
+            self.serial_port = None
+            self.is_connected = False
+            error_msg = "串口打开失败"
+            self.connection_error.emit(error_msg)
+            return False, error_msg
         except serial.SerialException as e:
+            self.serial_port = None
+            self.is_connected = False
             error_msg = f"串口连接失败: {e}"
             self.connection_error.emit(error_msg)
             return False, error_msg
         except Exception as e:
+            self.serial_port = None
+            self.is_connected = False
             error_msg = f"未知错误: {e}"
             self.connection_error.emit(error_msg)
             return False, error_msg
 
     def disconnect_port(self) -> bool:
+        """断开当前串口；即使底层关闭异常也强制清理软件状态。"""
+
+        port = self.serial_port
+        was_connected = self.is_connected
+        port_name = getattr(port, "port", "") if port is not None else ""
+        success = True
+
         try:
             self.stop_cyclic_send()
-            if self.serial_port and self.serial_port.is_open:
-                port_name = self.serial_port.port
-                self._set_tx_low(False)
-                self.serial_port.close()
-                self.is_connected = False
-                self.port_disconnected.emit(port_name)
-                return True
-
-            self.is_connected = False
-            return True
+            if port is not None and getattr(port, "is_open", False):
+                try:
+                    self._set_tx_low(False)
+                finally:
+                    port.close()
         except Exception:
-            return False
+            success = False
+        finally:
+            self.is_connected = False
+            self.serial_port = None
+            if was_connected and port_name:
+                self.port_disconnected.emit(str(port_name))
+
+        return success
+
+    def _normalize_frame_for_mode(
+        self,
+        frame_data,
+        send_mode: str,
+        label: str = "发送数据",
+    ) -> Tuple[Optional[List[int]], str]:
+        """统一校验帧字节和发送模式要求的固定长度。"""
+
+        if not isinstance(send_mode, str) or send_mode not in SUPPORTED_SEND_MODES:
+            return None, f"不支持的发送模式: {send_mode}"
+
+        try:
+            normalized = normalize_frame(frame_data, label=label)
+        except ValueError as exc:
+            return None, str(exc)
+
+        expected_length = SEND_MODE_FRAME_LENGTHS.get(send_mode)
+        if expected_length is not None and len(normalized) != expected_length:
+            return None, f"{label}长度必须为 {expected_length} 字节"
+
+        return normalized, ""
 
     def send_single_frame(
         self,
@@ -124,19 +201,22 @@ class SerialManager(QObject):
         if not self.is_connected or not self.serial_port:
             return False, "串口未连接"
 
-        expected_length = len(frame_data)
-        if expected_length == 0:
-            return False, "数据不能为空"
+        normalized_frame, error_msg = self._normalize_frame_for_mode(
+            frame_data,
+            send_mode,
+        )
+        if normalized_frame is None:
+            return False, error_msg
 
         if send_mode == SEND_MODE_BATTERY_SINGLE_WIRE:
-            return self._send_battery_single_wire_frame(frame_data, skip_ui_update)
+            return self._send_battery_single_wire_frame(normalized_frame, skip_ui_update)
         if send_mode == SEND_MODE_LUYUAN_BMS_SIF:
-            return self._send_luyuan_bms_sif_frame(frame_data, skip_ui_update)
+            return self._send_luyuan_bms_sif_frame(normalized_frame, skip_ui_update)
         if send_mode == SEND_MODE_JINGXIAN_SIF:
-            return self._send_jingxian_sif_frame(frame_data, skip_ui_update)
-        if send_mode != SEND_MODE_UART:
-            return False, f"不支持的发送模式: {send_mode}"
+            return self._send_jingxian_sif_frame(normalized_frame, skip_ui_update)
 
+        frame_data = normalized_frame
+        expected_length = len(frame_data)
         try:
             self._set_tx_low(False)
             data_bytes = bytes(frame_data)
@@ -163,6 +243,7 @@ class SerialManager(QObject):
             return False, error_msg
         except serial.SerialException as e:
             error_msg = f"串口发送失败: {e}"
+            self.disconnect_port()
             if not skip_ui_update:
                 self.send_error.emit(error_msg)
             return False, error_msg
@@ -312,46 +393,92 @@ class SerialManager(QObject):
         while time.perf_counter() < deadline:
             pass
 
+    def _validate_send_interval(
+        self,
+        interval_ms: int,
+        min_interval_ms: int,
+        max_interval_ms: int,
+    ) -> str:
+        """校验协议声明的循环发送间隔及当前输入值。"""
+
+        if (
+            isinstance(min_interval_ms, bool)
+            or not isinstance(min_interval_ms, int)
+            or isinstance(max_interval_ms, bool)
+            or not isinstance(max_interval_ms, int)
+            or min_interval_ms <= 0
+            or max_interval_ms < min_interval_ms
+        ):
+            return "发送间隔约束配置无效"
+
+        if (
+            isinstance(interval_ms, bool)
+            or not isinstance(interval_ms, int)
+            or not (min_interval_ms <= interval_ms <= max_interval_ms)
+        ):
+            return f"发送间隔必须在{min_interval_ms}ms-{max_interval_ms}ms范围内"
+
+        return ""
+
     def start_cyclic_send(
         self,
         frame_data: List[int],
         interval_ms: int = 500,
         send_mode: str = SEND_MODE_UART,
+        min_interval_ms: int = MIN_SEND_INTERVAL_MS,
+        max_interval_ms: int = MAX_SEND_INTERVAL_MS,
     ) -> Tuple[bool, str]:
-        return self.start_cyclic_send_sequence([frame_data], interval_ms, send_mode)
+        return self.start_cyclic_send_sequence(
+            [frame_data],
+            interval_ms,
+            send_mode,
+            min_interval_ms,
+            max_interval_ms,
+        )
 
     def start_cyclic_send_sequence(
         self,
         frame_sequence: List[List[int]],
         interval_ms: int = 500,
         send_mode: str = SEND_MODE_UART,
+        min_interval_ms: int = MIN_SEND_INTERVAL_MS,
+        max_interval_ms: int = MAX_SEND_INTERVAL_MS,
     ) -> Tuple[bool, str]:
-        if not self.is_connected:
+        if not self.is_connected or self.serial_port is None:
             return False, "串口未连接"
+        if not isinstance(frame_sequence, (list, tuple)):
+            return False, "循环数据包组必须是帧列表"
         if not frame_sequence:
             return False, "循环数据包组不能为空"
-        if send_mode not in {
-            SEND_MODE_UART,
-            SEND_MODE_BATTERY_SINGLE_WIRE,
-            SEND_MODE_LUYUAN_BMS_SIF,
-            SEND_MODE_JINGXIAN_SIF,
-        }:
+        if not isinstance(send_mode, str) or send_mode not in SUPPORTED_SEND_MODES:
             return False, f"不支持的发送模式: {send_mode}"
 
         normalized_frames: List[List[int]] = []
         for index, frame_data in enumerate(frame_sequence, start=1):
-            if len(frame_data) == 0:
-                return False, f"第{index}组数据包不能为空"
-            normalized_frames.append(frame_data.copy())
+            normalized_frame, error_msg = self._normalize_frame_for_mode(
+                frame_data,
+                send_mode,
+                label=f"第{index}组数据包",
+            )
+            if normalized_frame is None:
+                return False, error_msg
+            normalized_frames.append(normalized_frame)
 
-        if not (500 <= interval_ms <= 5000):
-            return False, "发送间隔必须在500ms-5000ms范围内"
+        interval_error = self._validate_send_interval(
+            interval_ms,
+            min_interval_ms,
+            max_interval_ms,
+        )
+        if interval_error:
+            return False, interval_error
 
         self.cyclic_data = normalized_frames[0].copy()
         self.cyclic_frame_sequence = normalized_frames
         self.cyclic_frame_index = 0
         self.cyclic_send_mode = send_mode
         self.send_interval_ms = interval_ms
+        self.cyclic_min_interval_ms = min_interval_ms
+        self.cyclic_max_interval_ms = max_interval_ms
         self.send_count = 0
 
         self.send_timer.start(interval_ms)
@@ -361,8 +488,13 @@ class SerialManager(QObject):
         if not self.is_cyclic_sending():
             return False, "当前没有正在运行的循环发送"
 
-        if not (500 <= interval_ms <= 5000):
-            return False, "发送间隔必须在500ms-5000ms范围内"
+        interval_error = self._validate_send_interval(
+            interval_ms,
+            self.cyclic_min_interval_ms,
+            self.cyclic_max_interval_ms,
+        )
+        if interval_error:
+            return False, interval_error
 
         self.send_interval_ms = interval_ms
         self.send_timer.start(interval_ms)
@@ -374,6 +506,8 @@ class SerialManager(QObject):
         self.cyclic_frame_sequence = []
         self.cyclic_frame_index = 0
         self.cyclic_send_mode = SEND_MODE_UART
+        self.cyclic_min_interval_ms = MIN_SEND_INTERVAL_MS
+        self.cyclic_max_interval_ms = MAX_SEND_INTERVAL_MS
 
     def _get_next_cyclic_frame(self) -> Optional[List[int]]:
         if not self.cyclic_frame_sequence:
@@ -385,7 +519,11 @@ class SerialManager(QObject):
         return frame_data
 
     def _send_cyclic_data(self):
-        if not self.cyclic_frame_sequence or not self.is_connected:
+        if not self.cyclic_frame_sequence:
+            self.stop_cyclic_send()
+            return
+        if not self.is_connected:
+            self.stop_cyclic_send()
             return
 
         self.send_count += 1
@@ -417,7 +555,11 @@ class SerialManager(QObject):
         return self.send_timer.isActive()
 
     def set_tosc_value(self, tosc_us: int) -> bool:
-        if 32 <= tosc_us <= 320:
+        if (
+            not isinstance(tosc_us, bool)
+            and isinstance(tosc_us, int)
+            and 32 <= tosc_us <= 320
+        ):
             self.tosc_us = tosc_us
             return True
         return False
@@ -440,7 +582,7 @@ class SerialPortDetector(QObject):
     def __init__(self):
         super().__init__()
         self.last_ports: List[SerialPortInfo] = []
-        self.detection_timer = QTimer()
+        self.detection_timer = QTimer(self)
         self.detection_timer.timeout.connect(self._check_ports)
 
     def start_detection(self, interval_ms: int = 2000):
@@ -452,15 +594,7 @@ class SerialPortDetector(QObject):
 
     def _check_ports(self):
         try:
-            current_ports: List[SerialPortInfo] = []
-            for port_info in serial.tools.list_ports.comports():
-                current_ports.append(
-                    SerialPortInfo(
-                        port=port_info.device,
-                        description=port_info.description,
-                        hwid=port_info.hwid or "",
-                    )
-                )
+            current_ports = _enumerate_serial_ports()
 
             if len(current_ports) != len(self.last_ports) or any(
                 p1.port != p2.port for p1, p2 in zip(current_ports, self.last_ports)

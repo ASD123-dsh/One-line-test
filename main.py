@@ -9,23 +9,28 @@
 """
 
 import sys
-import os
+import traceback
+
 from PyQt5.QtWidgets import QApplication
-from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIcon, QFont
+
+from app_paths import resource_path
 from gui.activation_dialog import ActivationDialog
 from gui.main_window import MainWindow
 from licensing.activation import ActivationService
 
 
-def resource_path(*parts) -> str:
-    if hasattr(sys, "_MEIPASS"):
-        base_dir = sys._MEIPASS
-    else:
-        base_dir = os.path.abspath(os.path.dirname(__file__))
-    return os.path.join(base_dir, *parts)
+def _write_exception_log(file_name: str) -> None:
+    """记录当前异常，同时避免日志写入失败掩盖原始异常。"""
 
-def main():
+    try:
+        with open(file_name, "w", encoding="utf-8") as file_obj:
+            traceback.print_exc(file=file_obj)
+    except OSError:
+        pass
+
+
+def main() -> None:
     """主程序入口"""
     # 创建应用程序实例
     app = QApplication(sys.argv)
@@ -56,16 +61,13 @@ def main():
     # 运行应用程序
     try:
         sys.exit(app.exec_())
-    except Exception as e:
-        with open("error.log", "w") as f:
-            f.write(str(e))
-        raise e
+    except Exception:
+        _write_exception_log("error.log")
+        raise
 
 if __name__ == "__main__":
     try:
         main()
-    except Exception as e:
-        with open("crash.log", "w") as f:
-            import traceback
-            traceback.print_exc(file=f)
-        print(f"Crash: {e}")
+    except Exception as exc:
+        _write_exception_log("crash.log")
+        print(f"Crash: {exc}")

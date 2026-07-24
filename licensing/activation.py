@@ -8,9 +8,10 @@ import base64
 import json
 import os
 import subprocess
+import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, List, Optional, Tuple
 
 import rsa
 
@@ -44,7 +45,9 @@ DURATION_UNITS = {
 
 
 def _normalize_base64_token(token: str) -> str:
-    return "".join((token or "").strip().split())
+    if not isinstance(token, str):
+        return ""
+    return "".join(token.strip().split())
 
 
 def _encode_token_part(raw_bytes: bytes) -> str:
@@ -70,7 +73,10 @@ def _parse_datetime(value: Optional[str]) -> Optional[datetime]:
 
 
 def normalize_device_code(device_code: str) -> str:
-    raw = (device_code or "").strip().upper()
+    if not isinstance(device_code, str):
+        return ""
+
+    raw = device_code.strip().upper()
     filtered = "".join(ch for ch in raw if ch.isalnum())
     if len(filtered) == 32 and all(ch in "0123456789ABCDEF" for ch in filtered):
         return (
@@ -86,7 +92,11 @@ def build_legacy_activation_message(device_code: str) -> bytes:
 
 
 def build_validity_seconds(validity_value: int, validity_unit: str) -> int:
-    if validity_value <= 0:
+    if (
+        isinstance(validity_value, bool)
+        or not isinstance(validity_value, int)
+        or validity_value <= 0
+    ):
         raise ValueError("有效时长必须大于 0")
     unit_info = DURATION_UNITS.get(validity_unit)
     if unit_info is None:
@@ -95,6 +105,12 @@ def build_validity_seconds(validity_value: int, validity_unit: str) -> int:
 
 
 def describe_validity_duration(validity_value: int, validity_unit: str) -> str:
+    if (
+        isinstance(validity_value, bool)
+        or not isinstance(validity_value, int)
+        or validity_value <= 0
+    ):
+        raise ValueError("有效时长必须大于 0")
     unit_info = DURATION_UNITS.get(validity_unit)
     if unit_info is None:
         raise ValueError("不支持的有效时长单位")
@@ -271,16 +287,19 @@ def verify_activation_code(
 
 
 def get_default_license_path() -> Path:
+    """返回默认授权文件路径，不在查询阶段创建目录。"""
+
     appdata_dir = os.getenv("APPDATA")
     if appdata_dir:
         base_dir = Path(appdata_dir) / "AD仪表一线通协议测试工具"
     else:
         base_dir = Path.home() / ".ad_meter_single_wire_tool"
-    base_dir.mkdir(parents=True, exist_ok=True)
     return base_dir / LICENSE_FILE_NAME
 
 
-def _run_identifier_command(command: list[str]) -> str:
+def _run_identifier_command(command: List[str]) -> str:
+    """执行设备标识命令，并用短超时避免阻塞应用启动。"""
+
     startupinfo = None
     if os.name == "nt":
         startupinfo = subprocess.STARTUPINFO()
@@ -293,6 +312,8 @@ def _run_identifier_command(command: list[str]) -> str:
             startupinfo=startupinfo,
             text=True,
             encoding="utf-8",
+            errors="ignore",
+            timeout=3.0,
         )
     except Exception:
         return ""
@@ -329,26 +350,61 @@ def _read_windows_machine_guid() -> str:
 
 
 def get_current_device_code() -> str:
-    candidates = [
-        _run_identifier_command(
-            [
-                "powershell",
-                "-NoProfile",
-                "-Command",
-                "(Get-CimInstance Win32_ComputerSystemProduct).UUID",
-            ]
-        ),
-        _run_identifier_command(["wmic", "csproduct", "get", "uuid"]),
-        _read_windows_machine_guid(),
+    """按优先级读取设备码，成功后立即停止后续慢速探测。"""
+
+    identifier_commands = [
+        [
+            "powershell",
+            "-NoProfile",
+            "-Command",
+            "(Get-CimInstance Win32_ComputerSystemProduct).UUID",
+        ],
+        ["wmic", "csproduct", "get", "uuid"],
     ]
 
-    for candidate in candidates:
+    for command in identifier_commands:
+        candidate = _run_identifier_command(command)
         normalized = normalize_device_code(candidate)
         if normalized and normalized not in INVALID_UUID_MARKERS:
             return normalized
 
+    candidate = _read_windows_machine_guid()
+    normalized = normalize_device_code(candidate)
+    if normalized and normalized not in INVALID_UUID_MARKERS:
+        return normalized
+
     fallback = os.getenv("COMPUTERNAME") or os.getenv("HOSTNAME") or "UNKNOWN-DEVICE"
     return normalize_device_code(fallback)
+
+
+def _write_json_atomically(path: Path, payload: dict) -> None:
+    """在目标目录写临时文件后原子替换，避免中断时破坏旧授权。"""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path: Optional[Path] = None
+
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=str(path.parent),
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as file_obj:
+            temporary_path = Path(file_obj.name)
+            json.dump(payload, file_obj, ensure_ascii=False, indent=2)
+            file_obj.flush()
+            os.fsync(file_obj.fileno())
+
+        os.replace(str(temporary_path), str(path))
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink()
+            except OSError:
+                pass
 
 
 class ActivationService:
@@ -384,6 +440,10 @@ class ActivationService:
             return None
 
         if not isinstance(record, dict):
+            return None
+        if not isinstance(record.get("device_code"), str):
+            return None
+        if not isinstance(record.get("activation_code"), str):
             return None
         return record
 
@@ -434,7 +494,7 @@ class ActivationService:
     def is_activated(self) -> bool:
         return self.get_license_info()["activated"]
 
-    def activate(self, activation_code: str) -> tuple[bool, str]:
+    def activate(self, activation_code: str) -> Tuple[bool, str]:
         device_code = self.get_device_code()
         result = inspect_activation_code(
             device_code,
@@ -463,9 +523,7 @@ class ActivationService:
         }
 
         try:
-            self.license_path.parent.mkdir(parents=True, exist_ok=True)
-            with self.license_path.open("w", encoding="utf-8") as file_obj:
-                json.dump(record, file_obj, ensure_ascii=False, indent=2)
+            _write_json_atomically(self.license_path, record)
         except OSError as exc:
             return False, f"激活信息保存失败：{exc}"
 

@@ -18,17 +18,26 @@ _APP = QApplication.instance() or QApplication([])
 
 
 class FakeSerialPort:
-    def __init__(self, bytes_written=None):
+    def __init__(self, bytes_written=None, close_error=None):
         self.bytes_written = bytes_written
+        self.close_error = close_error
         self.last_payload = None
         self.break_history = []
         self._break_condition = False
+        self.is_open = True
+        self.port = "COM1"
+        self.baudrate = 9600
 
     def write(self, payload):
         self.last_payload = payload
         if self.bytes_written is not None:
             return self.bytes_written
         return len(payload)
+
+    def close(self):
+        if self.close_error is not None:
+            raise self.close_error
+        self.is_open = False
 
     @property
     def break_condition(self):
@@ -65,6 +74,13 @@ class SerialManagerTests(unittest.TestCase):
         self.assertFalse(success)
         self.assertEqual(error, "数据发送不完整，期望10字节，实际发送8字节")
 
+    def test_send_single_frame_rejects_invalid_byte_before_writing(self):
+        success, error = self.manager.send_single_frame([0x01, 0x100])
+
+        self.assertFalse(success)
+        self.assertIn("0-255", error)
+        self.assertIsNone(self.manager.serial_port.last_payload)
+
     def test_start_cyclic_send_accepts_10_byte_frame(self):
         frame_data = [0x3A, 0xC0, 0x50, 0x7E, 0x00, 0x1C, 0x1F, 0x02, 0x12, 0x17]
 
@@ -92,6 +108,66 @@ class SerialManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.cyclic_data, frame_sequence[0])
         self.assertEqual(self.manager.cyclic_frame_index, 0)
         mock_start.assert_called_once_with(1200)
+
+    def test_start_cyclic_send_sequence_rejects_invalid_later_frame(self):
+        frame_sequence = [[0x01, 0x02], [0x03, -1]]
+
+        with patch.object(self.manager.send_timer, "start") as mock_start:
+            success, error = self.manager.start_cyclic_send_sequence(
+                frame_sequence,
+                1200,
+            )
+
+        self.assertFalse(success)
+        self.assertIn("第2组数据包", error)
+        mock_start.assert_not_called()
+
+    def test_start_cyclic_send_rejects_wrong_special_mode_length(self):
+        with patch.object(self.manager.send_timer, "start") as mock_start:
+            success, error = self.manager.start_cyclic_send(
+                [0x00] * 5,
+                500,
+                send_mode=SEND_MODE_BATTERY_SINGLE_WIRE,
+            )
+
+        self.assertFalse(success)
+        self.assertIn("6 字节", error)
+        mock_start.assert_not_called()
+
+    def test_start_cyclic_send_rejects_non_integer_interval(self):
+        frame_data = [0x01, 0x02]
+
+        for invalid_interval in (True, 500.0, "500"):
+            with self.subTest(invalid_interval=invalid_interval):
+                with patch.object(self.manager.send_timer, "start") as mock_start:
+                    success, error = self.manager.start_cyclic_send(
+                        frame_data,
+                        invalid_interval,
+                    )
+
+                self.assertFalse(success)
+                self.assertIn("发送间隔必须在", error)
+                mock_start.assert_not_called()
+
+    def test_cyclic_send_uses_protocol_specific_interval_policy(self):
+        with patch.object(self.manager.send_timer, "start") as mock_start:
+            success, error = self.manager.start_cyclic_send(
+                [0x01, 0x02],
+                100,
+                min_interval_ms=50,
+                max_interval_ms=200,
+            )
+
+        self.assertTrue(success, error)
+        self.assertEqual(self.manager.cyclic_min_interval_ms, 50)
+        self.assertEqual(self.manager.cyclic_max_interval_ms, 200)
+        mock_start.assert_called_once_with(100)
+
+        with patch.object(self.manager.send_timer, "isActive", return_value=True):
+            success, error = self.manager.update_cyclic_send_interval(49)
+
+        self.assertFalse(success)
+        self.assertEqual(error, "发送间隔必须在50ms-200ms范围内")
 
     def test_update_cyclic_send_interval_restarts_active_timer(self):
         self.manager.cyclic_frame_sequence = [[0x3A, 0xC0, 0x50, 0x7E, 0x00, 0x1C, 0x1F, 0x02, 0x12, 0x17]]
@@ -222,6 +298,43 @@ class SerialManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.serial_port.break_history[-1], True)
         self.assertEqual([call.args[0] for call in mock_sleep.call_args_list[:6]], [50, 1, 0.5, 1, 0.5, 1])
         self.assertEqual(mock_sleep.call_args_list[-1].args[0], 0)
+
+    def test_disconnect_clears_state_even_when_close_fails(self):
+        self.manager.serial_port = FakeSerialPort(close_error=RuntimeError("close failed"))
+        disconnected_ports = []
+        self.manager.port_disconnected.connect(disconnected_ports.append)
+
+        success = self.manager.disconnect_port()
+
+        self.assertFalse(success)
+        self.assertFalse(self.manager.is_connected)
+        self.assertIsNone(self.manager.serial_port)
+        self.assertEqual(disconnected_ports, ["COM1"])
+
+    def test_connect_reports_port_that_did_not_open_through_signal(self):
+        manager = SerialManager()
+        unopened_port = FakeSerialPort()
+        unopened_port.is_open = False
+        errors = []
+        manager.connection_error.connect(errors.append)
+
+        with patch("serial_comm.serial_manager.serial.Serial", return_value=unopened_port):
+            success, error = manager.connect_port("COM9", 9600)
+
+        self.assertFalse(success)
+        self.assertEqual(error, "串口打开失败")
+        self.assertEqual(errors, ["串口打开失败"])
+        self.assertFalse(manager.is_connected)
+        self.assertIsNone(manager.serial_port)
+
+    def test_set_tosc_value_rejects_bool_and_non_integer_values(self):
+        original_tosc = self.manager.tosc_us
+
+        for invalid_value in (True, 100.0, "100"):
+            with self.subTest(invalid_value=invalid_value):
+                self.assertFalse(self.manager.set_tosc_value(invalid_value))
+
+        self.assertEqual(self.manager.tosc_us, original_tosc)
 
 
 if __name__ == "__main__":

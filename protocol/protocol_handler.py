@@ -6,46 +6,31 @@
 负责不同厂商协议的帧生成、校验和基础场景预设。
 """
 
-from dataclasses import dataclass
 from typing import Dict, List, Tuple
 
-PROTOCOL_RUILUN = "瑞轮协议"
-PROTOCOL_FZ_SIF = "FZ-sif协议"
-PROTOCOL_XINRI = "新日协议"
-PROTOCOL_HANGZHOU_ANXIAN = "杭州安显协议"
-PROTOCOL_CHANGZHOU_XINSIWEI = "常州新思维协议"
-PROTOCOL_WUXI_YIGE = "无锡一格Y67协议"
-PROTOCOL_TAILING_Y34B = "无锡台铃Y34B协议"
-PROTOCOL_TAILING_Y34F = "无锡台铃Y34F协议"
-PROTOCOL_SHENZHOUXING = "神州行协议"
-PROTOCOL_YADEA = "雅迪协议"
-PROTOCOL_YOUYIBAO = "优仪宝一线通协议"
-PROTOCOL_JINGXIAN = "精显一线通协议"
-PROTOCOL_DONGWEI_GTXH = "东威GTXH协议"
-PROTOCOL_XINCHI = "芯驰BMS协议"
-PROTOCOL_LUYUAN_BMS = "绿源BMS一线通协议"
-PROTOCOL_LITHIUM_BMS = "一线通--锂电池BMS"
-PROTOCOL_BATTERY_SINGLE_WIRE = "电池单线通讯协议"
-
-SUPPORTED_PROTOCOLS = [
-    PROTOCOL_RUILUN,
-    PROTOCOL_FZ_SIF,
-    PROTOCOL_XINRI,
-    PROTOCOL_HANGZHOU_ANXIAN,
+from .definitions import (
+    DEFAULT_PROTOCOL_DEFINITION,
+    PROTOCOL_BATTERY_SINGLE_WIRE,
     PROTOCOL_CHANGZHOU_XINSIWEI,
-    PROTOCOL_WUXI_YIGE,
+    PROTOCOL_DEFINITIONS,
+    PROTOCOL_DONGWEI_GTXH,
+    PROTOCOL_FZ_SIF,
+    PROTOCOL_HANGZHOU_ANXIAN,
+    PROTOCOL_JINGXIAN,
+    PROTOCOL_LITHIUM_BMS,
+    PROTOCOL_LUYUAN_BMS,
+    PROTOCOL_RUILUN,
+    PROTOCOL_SHENZHOUXING,
     PROTOCOL_TAILING_Y34B,
     PROTOCOL_TAILING_Y34F,
-    PROTOCOL_SHENZHOUXING,
+    PROTOCOL_WUXI_YIGE,
+    PROTOCOL_XINCHI,
+    PROTOCOL_XINRI,
     PROTOCOL_YADEA,
     PROTOCOL_YOUYIBAO,
-    PROTOCOL_JINGXIAN,
-    PROTOCOL_DONGWEI_GTXH,
-    PROTOCOL_XINCHI,
-    PROTOCOL_LUYUAN_BMS,
-    PROTOCOL_LITHIUM_BMS,
-    PROTOCOL_BATTERY_SINGLE_WIRE,
-]
+    SUPPORTED_PROTOCOLS,
+)
+from .models import ProtocolConfig, StatusBits
 
 VOLTAGE_OPTIONS = (
     ("voltage_36v", 0x01),
@@ -57,173 +42,6 @@ VOLTAGE_OPTIONS = (
     ("voltage_84v", 0x40),
     ("voltage_96v", 0x80),
 )
-
-
-@dataclass
-class ProtocolConfig:
-    """协议基础配置。"""
-
-    tosc_us: int = 100
-    baud_rate: int = 9600
-    send_interval_ms: int = 500
-
-
-@dataclass
-class StatusBits:
-    """统一的协议状态模型。"""
-
-    protocol_name: str = PROTOCOL_RUILUN
-
-    # Status1
-    distance_mode: bool = False
-    speed_alarm: bool = False
-    p_gear_protect: bool = False
-    tcs_status: bool = False
-    protocol_speed_limit: bool = False
-    side_stand: bool = False
-    low_voltage_alarm: bool = False
-
-    # Status2
-    walk_mode: bool = False
-    hall_fault: bool = False
-    throttle_fault: bool = False
-    controller_fault: bool = False
-    under_voltage: bool = False
-    cruise: bool = False
-    assist: bool = False
-    motor_phase_loss: bool = False
-
-    # Status3
-    gear_four: bool = False
-    motor_running: bool = False
-    brake: bool = False
-    controller_protect: bool = False
-    regen_charging: bool = False
-    anti_runaway: bool = False
-    speed_mode: int = 0
-
-    # Status4
-    current_70_flag: bool = False
-    one_key_enable: bool = False
-    ekk_enable: bool = False
-    over_current: bool = False
-    stall_protect: bool = False
-    reverse: bool = False
-    electronic_brake: bool = False
-    speed_limit: bool = False
-    cloud_power_mode: bool = False
-
-    # 台铃 Y34 扩展状态
-    tailing_national_standard: bool = False
-    tailing_actual_speed_mode: bool = False
-    tailing_tire_pressure_low: bool = False
-    tailing_tcs_indicator: bool = False
-    tailing_hdc_indicator: bool = False
-    tailing_dual_undervoltage: bool = False
-    tailing_seat_state: int = 0
-    tailing_dual_soc: bool = False
-    tailing_display_sleep: bool = False
-    tailing_speed_15kmh_warning: bool = False
-    tailing_brake_fault: bool = False
-    tailing_display_voltage_from_data: bool = False
-    tailing_battery_over_temp: bool = False
-    tailing_battery_over_current: bool = False
-    tailing_battery_over_voltage: bool = False
-    tailing_real_time_voltage_v: float = 48.0
-
-    # 神州行扩展状态
-    shenzhouxing_hdc: bool = False
-    shenzhouxing_hhc: bool = False
-    shenzhouxing_tcs: bool = False
-    shenzhouxing_brake_fault: bool = False
-    shenzhouxing_bluetooth: bool = False
-    shenzhouxing_time_display: bool = False
-    shenzhouxing_4g_signal_indicator: bool = False
-    shenzhouxing_position_indicator: bool = False
-    shenzhouxing_real_time_voltage_v: int = 48
-    shenzhouxing_signal_strength: int = 0
-    shenzhouxing_time_hour: int = 0
-    shenzhouxing_time_minute: int = 0
-    shenzhouxing_push_assist: bool = False
-    shenzhouxing_p_blink: bool = False
-
-    # 运行数据
-    current_a: int = 0
-    hall_count: int = 0
-    speed_kmh: float = 0.0  # 兼容旧 UI 的兜底输入
-
-    # 百分比类数据
-    soc_percent: int = 50
-    soc_fault: bool = False
-    lithium_soc_mode: bool = True
-    voltage_percentage: int = 0
-    current_percentage: int = 0
-
-    # 协议切换电压
-    voltage_24v: bool = False
-    voltage_36v: bool = False
-    voltage_48v: bool = True
-    voltage_60v: bool = False
-    voltage_64v: bool = False
-    voltage_72v: bool = False
-    voltage_80v: bool = False
-    voltage_84v: bool = False
-    voltage_96v: bool = False
-
-    # 常州新思维
-    xinsiwei_reserved_d3: bool = False
-    xinsiwei_reserved_d2: bool = False
-    xinsiwei_reserved_d1: bool = False
-    xinsiwei_reserved_d0: bool = False
-    xinsiwei_protocol: bool = False
-    xinsiwei_sequence: int = 0
-    xinsiwei_hall_count: int = 0
-
-    # 兼容旧代码中残留的字段
-    backup_power: bool = False
-    protocol_identifier: int = 0
-    sequence_number: int = 0
-
-    # 芯驰 BMS-SIF
-    xinchi_charge_mos: bool = False
-    xinchi_discharge_mos: bool = False
-    xinchi_high_temp_fault: bool = False
-    xinchi_low_temp_fault: bool = False
-    xinchi_over_voltage_fault: bool = False
-    xinchi_under_voltage_fault: bool = False
-    xinchi_bms_fault: bool = False
-    xinchi_cycle_count: int = 0
-    xinchi_temperature_c: int = 25
-    xinchi_total_voltage_v: float = 48.0
-    xinchi_total_current_a: int = 0
-
-    # 绿源 BMS 一线通
-    luyuan_charge_mos: bool = False
-    luyuan_discharge_mos: bool = False
-    luyuan_predischarge_mos: bool = False
-    luyuan_charge_enable: bool = False
-    luyuan_charger_connected: bool = False
-    luyuan_cycle_count: int = 0
-    luyuan_temperature_c: int = 25
-    luyuan_max_cell_voltage_mv: int = 4200
-    luyuan_min_cell_voltage_mv: int = 4100
-    luyuan_current_a: float = -12.0
-    luyuan_total_voltage_v: int = 54
-    luyuan_soh_percent: int = 100
-
-    # 一线通锂电池 BMS
-    lithium_bms_alarm_enable: bool = False
-    lithium_bms_high_temp_alarm: bool = False
-    lithium_bms_low_temp_alarm: bool = False
-    lithium_bms_soh_low: bool = False
-    lithium_bms_mos_fault: bool = False
-    lithium_bms_short_circuit_fault: bool = False
-    lithium_bms_cycle_count: int = 0
-    lithium_bms_max_temp_c: int = 25
-    lithium_bms_min_temp_c: int = 20
-    lithium_bms_total_voltage_v: float = 48.0
-    lithium_bms_max_cell_voltage_v: float = 3.60
-    lithium_bms_min_cell_voltage_v: float = 3.40
 
 
 class ProtocolHandler:
@@ -249,43 +67,26 @@ class ProtocolHandler:
     def get_protocol_frame_length(self, protocol_name: str) -> int:
         """获取协议帧长度。"""
 
-        if protocol_name == PROTOCOL_BATTERY_SINGLE_WIRE:
-            return 6
-        if protocol_name == PROTOCOL_SHENZHOUXING:
-            return 15
-        if protocol_name == PROTOCOL_TAILING_Y34F:
-            return 15
-        if protocol_name == PROTOCOL_LUYUAN_BMS:
-            return 15
-        if protocol_name == PROTOCOL_TAILING_Y34B:
-            return 13
-        if protocol_name == PROTOCOL_XINCHI:
-            return 10
-        return 12
+        definition = PROTOCOL_DEFINITIONS.get(
+            protocol_name, DEFAULT_PROTOCOL_DEFINITION
+        )
+        return definition.frame_length
 
     def get_protocol_checksum_mode(self, protocol_name: str) -> str:
         """获取协议校验模式。"""
 
-        if protocol_name in {
-            PROTOCOL_XINCHI,
-            PROTOCOL_LUYUAN_BMS,
-            PROTOCOL_BATTERY_SINGLE_WIRE,
-        }:
-            return "sum"
-        return "xor"
+        definition = PROTOCOL_DEFINITIONS.get(
+            protocol_name, DEFAULT_PROTOCOL_DEFINITION
+        )
+        return definition.checksum_mode
 
     def get_protocol_send_mode(self, protocol_name: str) -> str:
         """获取协议的串口发送模式。"""
 
-        if protocol_name in {
-            PROTOCOL_JINGXIAN,
-            PROTOCOL_LUYUAN_BMS,
-            PROTOCOL_BATTERY_SINGLE_WIRE,
-        }:
-            # The receive/forward platform expects raw UART bytes from the host
-            # and generates the custom SIF waveform on-device based on frame length.
-            return "uart"
-        return "uart"
+        definition = PROTOCOL_DEFINITIONS.get(
+            protocol_name, DEFAULT_PROTOCOL_DEFINITION
+        )
+        return definition.send_mode
 
     def get_current_xinsiwei_sequence(self) -> int:
         """获取当前常州新思维序号。"""
@@ -348,7 +149,14 @@ class ProtocolHandler:
     def validate_status_bits(self, status: StatusBits) -> Tuple[bool, str]:
         """校验状态字段是否合法。"""
 
+        if not isinstance(status, StatusBits):
+            return False, "协议状态必须是 StatusBits 对象"
+
         protocol_name = self.resolve_protocol_name(status)
+        if isinstance(status.current_a, bool) or not isinstance(status.current_a, (int, float)):
+            return False, "运行电流必须是数值"
+        current_a = float(status.current_a)
+
         speed_mode_max = (
             7
             if protocol_name
@@ -358,7 +166,31 @@ class ProtocolHandler:
         if not (0 <= status.speed_mode <= speed_mode_max):
             return False, f"当前协议的速度模式必须在 0-{speed_mode_max} 范围内"
 
-        if not (-128 <= status.current_a <= 127):
+        if (
+            protocol_name == PROTOCOL_XINRI
+            and not self._is_point_two_amp_current_in_range(
+                current_a, 0, 255, use_absolute=True
+            )
+        ):
+            # 修复新日电流超出单字节量程时被静默截断的问题。
+            return False, "新日协议电流绝对值必须在 0A 到 51.0A 范围内（0.2A/字节）"
+
+        if (
+            protocol_name == PROTOCOL_DONGWEI_GTXH
+            and not self._is_point_two_amp_current_in_range(
+                current_a, -128, 127
+            )
+        ):
+            # 修复东威电流超出有符号单字节量程时被静默截断的问题。
+            return False, "东威协议电流必须在 -25.6A 到 25.4A 范围内（0.2A/字节）"
+
+        if (
+            protocol_name not in {PROTOCOL_XINRI, PROTOCOL_DONGWEI_GTXH}
+            and not current_a.is_integer()
+        ):
+            return False, "当前协议的运行电流必须为整数安培"
+
+        if not (-128 <= current_a <= 127):
             return False, "运行电流必须在 -128A 到 127A 范围内"
 
         if not (0 <= status.hall_count <= 65535):
@@ -370,7 +202,14 @@ class ProtocolHandler:
         if not (0 <= status.speed_kmh <= 6553.5):
             return False, "兼容速度输入必须在 0-6553.5 范围内"
 
-        if not status.soc_fault and not (0 <= status.soc_percent <= 100):
+        definition = PROTOCOL_DEFINITIONS.get(
+            protocol_name, DEFAULT_PROTOCOL_DEFINITION
+        )
+        consumes_soc_fault = (
+            status.soc_fault and definition.soc_fault_value is not None
+        )
+        if not consumes_soc_fault and not (0 <= status.soc_percent <= 100):
+            # 仅真实编码 SOC 故障值的协议可以在故障态跳过百分比范围校验。
             return False, "百分比输入必须在 0-100 范围内"
 
         if not (0 <= status.voltage_percentage <= 100):
@@ -544,78 +383,32 @@ class ProtocolHandler:
     def generate_frame(self, status: StatusBits) -> Tuple[bool, List[int], str]:
         """根据协议生成发送帧。"""
 
-        protocol_name = self.resolve_protocol_name(status)
-        if protocol_name == PROTOCOL_CHANGZHOU_XINSIWEI:
-            return self.generate_xinsiwei_frame_with_auto_sequence(status)
-        if protocol_name == PROTOCOL_FZ_SIF:
-            return self._generate_fz_sif_frame(status)
-        if protocol_name == PROTOCOL_HANGZHOU_ANXIAN:
-            return self._generate_hangzhou_frame(status, preview=False)
-        if protocol_name == PROTOCOL_XINRI:
-            return self._generate_xinri_frame(status)
-        if protocol_name == PROTOCOL_WUXI_YIGE:
-            return self._generate_wuxi_yige_frame(status)
-        if protocol_name == PROTOCOL_TAILING_Y34B:
-            return self._generate_tailing_y34b_frame(status)
-        if protocol_name == PROTOCOL_TAILING_Y34F:
-            return self._generate_tailing_y34f_frame(status)
-        if protocol_name == PROTOCOL_SHENZHOUXING:
-            return self._generate_shenzhouxing_frame(status)
-        if protocol_name == PROTOCOL_YADEA:
-            return self._generate_yadea_frame(status)
-        if protocol_name == PROTOCOL_YOUYIBAO:
-            return self._generate_youyibao_frame(status)
-        if protocol_name == PROTOCOL_JINGXIAN:
-            return self._generate_jingxian_frame(status, preview=False)
-        if protocol_name == PROTOCOL_DONGWEI_GTXH:
-            return self._generate_dongwei_gtxh_frame(status)
-        if protocol_name == PROTOCOL_XINCHI:
-            return self._generate_xinchi_frame(status)
-        if protocol_name == PROTOCOL_LUYUAN_BMS:
-            return self._generate_luyuan_bms_frame(status)
-        if protocol_name == PROTOCOL_LITHIUM_BMS:
-            return self._generate_lithium_bms_frame(status)
-        if protocol_name == PROTOCOL_BATTERY_SINGLE_WIRE:
-            return self._generate_battery_single_wire_frame(status)
-        return self._generate_ruilun_frame(status)
+        return self._dispatch_frame_generation(status, preview=False)
 
     def generate_frame_for_preview(self, status: StatusBits) -> Tuple[bool, List[int], str]:
         """根据协议生成预览帧。"""
 
+        return self._dispatch_frame_generation(status, preview=True)
+
+    def _dispatch_frame_generation(
+        self, status: StatusBits, preview: bool
+    ) -> Tuple[bool, List[int], str]:
+        """按注册表选择发送或预览帧生成入口。"""
+
+        if not isinstance(status, StatusBits):
+            return False, [], "协议状态必须是 StatusBits 对象"
+
         protocol_name = self.resolve_protocol_name(status)
-        if protocol_name == PROTOCOL_CHANGZHOU_XINSIWEI:
-            return self.generate_xinsiwei_frame_for_preview(status)
-        if protocol_name == PROTOCOL_FZ_SIF:
-            return self._generate_fz_sif_frame(status)
-        if protocol_name == PROTOCOL_HANGZHOU_ANXIAN:
-            return self._generate_hangzhou_frame(status, preview=True)
-        if protocol_name == PROTOCOL_XINRI:
-            return self._generate_xinri_frame(status)
-        if protocol_name == PROTOCOL_WUXI_YIGE:
-            return self._generate_wuxi_yige_frame(status)
-        if protocol_name == PROTOCOL_TAILING_Y34B:
-            return self._generate_tailing_y34b_frame(status)
-        if protocol_name == PROTOCOL_TAILING_Y34F:
-            return self._generate_tailing_y34f_frame(status)
-        if protocol_name == PROTOCOL_SHENZHOUXING:
-            return self._generate_shenzhouxing_frame(status)
-        if protocol_name == PROTOCOL_YADEA:
-            return self._generate_yadea_frame(status)
-        if protocol_name == PROTOCOL_YOUYIBAO:
-            return self._generate_youyibao_frame(status)
-        if protocol_name == PROTOCOL_JINGXIAN:
-            return self._generate_jingxian_frame(status, preview=True)
-        if protocol_name == PROTOCOL_DONGWEI_GTXH:
-            return self._generate_dongwei_gtxh_frame(status)
-        if protocol_name == PROTOCOL_XINCHI:
-            return self._generate_xinchi_frame(status)
-        if protocol_name == PROTOCOL_LUYUAN_BMS:
-            return self._generate_luyuan_bms_frame(status)
-        if protocol_name == PROTOCOL_LITHIUM_BMS:
-            return self._generate_lithium_bms_frame(status)
-        if protocol_name == PROTOCOL_BATTERY_SINGLE_WIRE:
-            return self._generate_battery_single_wire_frame(status)
-        return self._generate_ruilun_frame(status)
+        definition = PROTOCOL_DEFINITIONS.get(
+            protocol_name, DEFAULT_PROTOCOL_DEFINITION
+        )
+        generator_method = definition.generator_method
+        if preview and definition.preview_generator_method is not None:
+            generator_method = definition.preview_generator_method
+        try:
+            return getattr(self, generator_method)(status)
+        except (AttributeError, OverflowError, TypeError, ValueError) as exc:
+            return False, [], f"协议状态参数无效：{exc}"
 
     def _generate_ruilun_frame(self, status: StatusBits) -> Tuple[bool, List[int], str]:
         is_valid, error_msg = self.validate_status_bits(status)
@@ -658,6 +451,20 @@ class ProtocolHandler:
         frame[10] = self._encode_fz_sif_voltage_mask(status)
         frame[11] = self._xor_checksum(frame[:11])
         return True, frame, ""
+
+    def _generate_hangzhou_frame_for_send(
+        self, status: StatusBits
+    ) -> Tuple[bool, List[int], str]:
+        """生成杭州安显发送帧，并按原规则递增序号。"""
+
+        return self._generate_hangzhou_frame(status, preview=False)
+
+    def _generate_hangzhou_frame_for_preview(
+        self, status: StatusBits
+    ) -> Tuple[bool, List[int], str]:
+        """生成杭州安显预览帧，不递增序号。"""
+
+        return self._generate_hangzhou_frame(status, preview=True)
 
     def _generate_hangzhou_frame(
         self, status: StatusBits, preview: bool
@@ -719,7 +526,11 @@ class ProtocolHandler:
         frame[6] = self._encode_signed_current(status.current_a)
         frame[7] = (status.xinsiwei_hall_count >> 8) & 0xFF
         frame[8] = status.xinsiwei_hall_count & 0xFF
-        frame[9] = 0xEE if status.soc_fault else (status.soc_percent & 0xFF)
+        frame[9] = (
+            self._encode_soc_fault(PROTOCOL_CHANGZHOU_XINSIWEI)
+            if status.soc_fault
+            else (status.soc_percent & 0xFF)
+        )
         frame[10] = self._encode_voltage_mask(status)
         frame[11] = self._xor_checksum(frame[:11])
 
@@ -884,6 +695,20 @@ class ProtocolHandler:
         frame[10] = status.current_percentage & 0xFF
         frame[11] = self._xor_checksum(frame[:11])
         return True, frame, ""
+
+    def _generate_jingxian_frame_for_send(
+        self, status: StatusBits
+    ) -> Tuple[bool, List[int], str]:
+        """生成精显发送帧，并按原规则递增序号。"""
+
+        return self._generate_jingxian_frame(status, preview=False)
+
+    def _generate_jingxian_frame_for_preview(
+        self, status: StatusBits
+    ) -> Tuple[bool, List[int], str]:
+        """生成精显预览帧，不递增序号。"""
+
+        return self._generate_jingxian_frame(status, preview=True)
 
     def _generate_jingxian_frame(
         self, status: StatusBits, preview: bool
@@ -1401,10 +1226,18 @@ class ProtocolHandler:
 
     def _encode_ruilun_soc(self, status: StatusBits) -> int:
         if status.soc_fault:
-            return 0xEE
+            return self._encode_soc_fault(PROTOCOL_RUILUN)
         if status.lithium_soc_mode:
             return 0x80 | (status.soc_percent & 0x7F)
         return 0x00
+
+    def _encode_soc_fault(self, protocol_name: str) -> int:
+        """从协议定义读取并返回 SOC 故障编码。"""
+
+        fault_value = PROTOCOL_DEFINITIONS[protocol_name].soc_fault_value
+        if fault_value is None:
+            raise ValueError(f"{protocol_name} 未定义 SOC 故障编码")
+        return fault_value
 
     def _encode_yige_soc(self, status: StatusBits) -> int:
         if status.lithium_soc_mode:
@@ -1434,13 +1267,31 @@ class ProtocolHandler:
         return 0x00
 
     def _encode_signed_current(self, current_a: int) -> int:
-        return current_a & 0xFF
+        return int(current_a) & 0xFF
 
-    def _encode_xinri_current(self, current_a: int) -> int:
+    def _is_point_two_amp_current_in_range(
+        self,
+        current_a: float,
+        minimum_raw: int,
+        maximum_raw: int,
+        use_absolute: bool = False,
+    ) -> bool:
+        """判断电流按 0.2A/字节换算后是否处于指定原始值范围。"""
+
+        try:
+            scaled_value = float(current_a) * 5
+        except (TypeError, ValueError):
+            return False
+
+        if use_absolute:
+            scaled_value = abs(scaled_value)
+        return minimum_raw <= scaled_value <= maximum_raw
+
+    def _encode_xinri_current(self, current_a: float) -> int:
         raw_value = round(abs(current_a) * 5)
         return max(0, min(255, raw_value))
 
-    def _encode_dongwei_current(self, current_a: int) -> int:
+    def _encode_dongwei_current(self, current_a: float) -> int:
         scaled_value = round(current_a * 5)
         scaled_value = max(-128, min(127, scaled_value))
         return scaled_value & 0xFF

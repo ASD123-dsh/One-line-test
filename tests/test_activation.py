@@ -1,7 +1,10 @@
+import json
+import os
 import tempfile
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 import rsa
 
@@ -10,6 +13,8 @@ from licensing.activation import (
     build_validity_seconds,
     describe_validity_duration,
     generate_activation_code,
+    get_current_device_code,
+    get_default_license_path,
     normalize_device_code,
     verify_activation_code,
 )
@@ -119,6 +124,48 @@ class ActivationTests(unittest.TestCase):
             self.assertFalse(success)
             self.assertIn("过期", message)
 
+    def test_activation_service_rejects_malformed_record_without_crashing(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            license_path = Path(temp_dir) / "activation_license.json"
+            license_path.write_text(
+                json.dumps({"device_code": 123, "activation_code": []}),
+                encoding="utf-8",
+            )
+            service = ActivationService(
+                public_key_pem=self.public_key.save_pkcs1().decode("ascii"),
+                license_path=license_path,
+                device_code_provider=lambda: self.device_code,
+            )
+
+            self.assertFalse(service.is_activated())
+
+    def test_atomic_save_failure_preserves_existing_license_file(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            license_path = Path(temp_dir) / "activation_license.json"
+            original_content = '{"existing": true}'
+            license_path.write_text(original_content, encoding="utf-8")
+            activation_code = generate_activation_code(
+                self.device_code,
+                self.private_key,
+            )
+            service = ActivationService(
+                public_key_pem=self.public_key.save_pkcs1().decode("ascii"),
+                license_path=license_path,
+                device_code_provider=lambda: self.device_code,
+                now_provider=lambda: self.fixed_now,
+            )
+
+            with patch(
+                "licensing.activation.os.replace",
+                side_effect=OSError("replace failed"),
+            ):
+                success, message = service.activate(activation_code)
+
+            self.assertFalse(success)
+            self.assertIn("保存失败", message)
+            self.assertEqual(license_path.read_text(encoding="utf-8"), original_content)
+            self.assertEqual(list(license_path.parent.glob("*.tmp")), [])
+
     def test_normalize_device_code_formats_plain_hex(self):
         self.assertEqual(
             normalize_device_code("12345678123456781234567812345678"),
@@ -163,6 +210,30 @@ class ActivationTests(unittest.TestCase):
 
     def test_describe_validity_duration(self):
         self.assertEqual(describe_validity_duration(12, "hours"), "12小时")
+
+    def test_default_license_path_lookup_has_no_directory_side_effect(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            appdata_path = Path(temp_dir) / "missing-appdata"
+            with patch.dict(os.environ, {"APPDATA": str(appdata_path)}):
+                license_path = get_default_license_path()
+
+            self.assertEqual(
+                license_path,
+                appdata_path / "AD仪表一线通协议测试工具" / "activation_license.json",
+            )
+            self.assertFalse(license_path.parent.exists())
+
+    def test_device_code_lookup_stops_after_first_valid_command(self):
+        with patch(
+            "licensing.activation._run_identifier_command",
+            return_value=self.device_code,
+        ) as command_mock:
+            with patch("licensing.activation._read_windows_machine_guid") as registry_mock:
+                device_code = get_current_device_code()
+
+        self.assertEqual(device_code, self.device_code)
+        command_mock.assert_called_once()
+        registry_mock.assert_not_called()
 
 
 if __name__ == "__main__":

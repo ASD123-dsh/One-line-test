@@ -1,5 +1,11 @@
+from dataclasses import FrozenInstanceError
 import unittest
 
+from protocol.definitions import PROTOCOL_DEFINITIONS, ProtocolDefinition
+from protocol.models import (
+    ProtocolConfig as ModelProtocolConfig,
+    StatusBits as ModelStatusBits,
+)
 from protocol.protocol_handler import (
     PROTOCOL_BATTERY_SINGLE_WIRE,
     PROTOCOL_CHANGZHOU_XINSIWEI,
@@ -19,7 +25,9 @@ from protocol.protocol_handler import (
     PROTOCOL_YADEA,
     PROTOCOL_YOUYIBAO,
     PresetScenarios,
+    ProtocolConfig,
     ProtocolHandler,
+    SUPPORTED_PROTOCOLS,
     StatusBits,
 )
 
@@ -27,6 +35,68 @@ from protocol.protocol_handler import (
 class ProtocolHandlerTests(unittest.TestCase):
     def setUp(self):
         self.handler = ProtocolHandler()
+
+    def test_protocol_models_remain_available_from_legacy_module(self):
+        self.assertIs(ProtocolConfig, ModelProtocolConfig)
+        self.assertIs(StatusBits, ModelStatusBits)
+
+    def test_protocol_registry_is_immutable_and_drives_public_metadata(self):
+        self.assertIsInstance(SUPPORTED_PROTOCOLS, list)
+        self.assertEqual(SUPPORTED_PROTOCOLS, list(PROTOCOL_DEFINITIONS))
+
+        for protocol_name, definition in PROTOCOL_DEFINITIONS.items():
+            self.assertEqual(definition.name, protocol_name)
+            self.assertEqual(
+                self.handler.get_protocol_frame_length(protocol_name),
+                definition.frame_length,
+            )
+            self.assertEqual(
+                self.handler.get_protocol_checksum_mode(protocol_name),
+                definition.checksum_mode,
+            )
+            self.assertEqual(
+                self.handler.get_protocol_send_mode(protocol_name),
+                definition.send_mode,
+            )
+            self.assertTrue(
+                callable(getattr(self.handler, definition.generator_method))
+            )
+            if definition.preview_generator_method is not None:
+                self.assertTrue(
+                    callable(
+                        getattr(self.handler, definition.preview_generator_method)
+                    )
+                )
+
+        with self.assertRaises(TypeError):
+            PROTOCOL_DEFINITIONS["测试协议"] = PROTOCOL_DEFINITIONS[PROTOCOL_RUILUN]
+        with self.assertRaises(FrozenInstanceError):
+            PROTOCOL_DEFINITIONS[PROTOCOL_RUILUN].frame_length = 99
+
+    def test_protocol_definition_rejects_invalid_interval_policy(self):
+        with self.assertRaisesRegex(ValueError, "发送间隔配置无效"):
+            ProtocolDefinition(
+                name="测试协议",
+                frame_length=12,
+                checksum_mode="xor",
+                send_mode="uart",
+                generator_method="_generate_test_frame",
+                min_send_interval_ms=1000,
+                max_send_interval_ms=500,
+                default_send_interval_ms=500,
+            )
+
+    def test_unknown_protocol_keeps_ruilun_fallback_behavior(self):
+        unknown_status = StatusBits(protocol_name="未注册协议")
+        ruilun_status = StatusBits(protocol_name=PROTOCOL_RUILUN)
+
+        unknown_result = self.handler.generate_frame_for_preview(unknown_status)
+        ruilun_result = self.handler.generate_frame_for_preview(ruilun_status)
+
+        self.assertEqual(unknown_result, ruilun_result)
+        self.assertEqual(self.handler.get_protocol_frame_length("未注册协议"), 12)
+        self.assertEqual(self.handler.get_protocol_checksum_mode("未注册协议"), "xor")
+        self.assertEqual(self.handler.get_protocol_send_mode("未注册协议"), "uart")
 
     def test_ruilun_frame_matches_v156_mapping(self):
         status = StatusBits(protocol_name=PROTOCOL_RUILUN)
@@ -60,6 +130,17 @@ class ProtocolHandlerTests(unittest.TestCase):
 
         self.assertTrue(success, error)
         self.assertEqual(frame, [8, 1, 6, 160, 96, 96, 5, 96, 144, 186, 100, 132])
+        self.assertEqual(self.handler.get_current_hangzhou_sequence(), 2)
+
+    def test_hangzhou_preview_does_not_increment_sequence(self):
+        status = StatusBits(protocol_name=PROTOCOL_HANGZHOU_ANXIAN)
+
+        first_preview = self.handler.generate_frame_for_preview(status)
+        second_preview = self.handler.generate_frame_for_preview(status)
+        send_result = self.handler.generate_frame(status)
+
+        self.assertEqual(first_preview, second_preview)
+        self.assertEqual(send_result, first_preview)
         self.assertEqual(self.handler.get_current_hangzhou_sequence(), 2)
 
     def test_fz_sif_frame_matches_bl1832_y62_mapping(self):
@@ -116,6 +197,38 @@ class ProtocolHandlerTests(unittest.TestCase):
 
         self.assertTrue(success, error)
         self.assertEqual(frame, [8, 97, 12, 84, 160, 64, 50, 18, 52, 0, 0, 197])
+
+    def test_xinri_current_accepts_exact_point_two_amp_byte_boundaries(self):
+        for current_a in (51.0, -51.0):
+            with self.subTest(current_a=current_a):
+                status = StatusBits(
+                    protocol_name=PROTOCOL_XINRI,
+                    current_a=current_a,
+                )
+
+                success, frame, error = self.handler.generate_frame_for_preview(
+                    status
+                )
+
+                self.assertTrue(success, error)
+                self.assertEqual(frame[6], 0xFF)
+
+    def test_xinri_current_rejects_out_of_range_values_instead_of_clipping(self):
+        for current_a in (51.2, -51.2):
+            with self.subTest(current_a=current_a):
+                status = StatusBits(
+                    protocol_name=PROTOCOL_XINRI,
+                    current_a=current_a,
+                )
+
+                success, frame, error = self.handler.generate_frame_for_preview(
+                    status
+                )
+
+                self.assertFalse(success)
+                self.assertEqual(frame, [])
+                self.assertIn("新日协议电流", error)
+                self.assertIn("0.2A", error)
 
     def test_wuxi_yige_frame_uses_fixed_device_and_seq(self):
         status = StatusBits(protocol_name=PROTOCOL_WUXI_YIGE)
@@ -370,6 +483,53 @@ class ProtocolHandlerTests(unittest.TestCase):
         self.assertTrue(success, error)
         self.assertEqual(frame, [8, 97, 10, 64, 201, 194, 246, 0, 42, 75, 60, 131])
 
+    def test_dongwei_current_accepts_signed_point_two_amp_byte_boundaries(self):
+        for current_a, expected_raw in ((-25.6, 0x80), (25.4, 0x7F)):
+            with self.subTest(current_a=current_a):
+                status = StatusBits(
+                    protocol_name=PROTOCOL_DONGWEI_GTXH,
+                    current_a=current_a,
+                )
+
+                success, frame, error = self.handler.generate_frame_for_preview(
+                    status
+                )
+
+                self.assertTrue(success, error)
+                self.assertEqual(frame[6], expected_raw)
+
+    def test_dongwei_current_rejects_out_of_range_values_instead_of_clipping(self):
+        for current_a in (-25.8, 25.6):
+            with self.subTest(current_a=current_a):
+                status = StatusBits(
+                    protocol_name=PROTOCOL_DONGWEI_GTXH,
+                    current_a=current_a,
+                )
+
+                success, frame, error = self.handler.generate_frame_for_preview(
+                    status
+                )
+
+                self.assertFalse(success)
+                self.assertEqual(frame, [])
+                self.assertIn("东威协议电流", error)
+                self.assertIn("0.2A", error)
+
+    def test_scaled_current_keeps_existing_rounding_for_fractional_input(self):
+        for protocol_name in (PROTOCOL_XINRI, PROTOCOL_DONGWEI_GTXH):
+            with self.subTest(protocol_name=protocol_name):
+                status = StatusBits(
+                    protocol_name=protocol_name,
+                    current_a=0.1,
+                )
+
+                success, frame, error = self.handler.generate_frame_for_preview(
+                    status
+                )
+
+                self.assertTrue(success, error)
+                self.assertEqual(frame[6], 0x00)
+
     def test_xinsiwei_preview_does_not_increment_sequence(self):
         status = PresetScenarios.changzhou_xinsiwei_normal_running()
 
@@ -383,6 +543,28 @@ class ProtocolHandlerTests(unittest.TestCase):
         self.assertEqual(preview_frame, [48, 1, 0, 62, 126, 62, 15, 95, 114, 142, 64, 163])
         self.assertEqual(send_frame, [48, 1, 0, 62, 126, 62, 15, 95, 114, 142, 64, 163])
         self.assertEqual(next_preview_frame, [48, 2, 0, 0, 64, 0, 15, 33, 52, 80, 2, 58])
+
+    def test_invalid_send_preserves_each_sequence_protocol_existing_semantics(self):
+        xinsiwei_status = StatusBits(
+            protocol_name=PROTOCOL_CHANGZHOU_XINSIWEI,
+            speed_mode=4,
+        )
+        hangzhou_status = StatusBits(
+            protocol_name=PROTOCOL_HANGZHOU_ANXIAN,
+            speed_mode=4,
+        )
+        jingxian_status = StatusBits(
+            protocol_name=PROTOCOL_JINGXIAN,
+            speed_mode=8,
+        )
+
+        self.assertFalse(self.handler.generate_frame(xinsiwei_status)[0])
+        self.assertFalse(self.handler.generate_frame(hangzhou_status)[0])
+        self.assertFalse(self.handler.generate_frame(jingxian_status)[0])
+
+        self.assertEqual(self.handler.get_current_xinsiwei_sequence(), 2)
+        self.assertEqual(self.handler.get_current_hangzhou_sequence(), 1)
+        self.assertEqual(self.handler.get_current_jingxian_sequence(), 1)
 
     def test_xinchi_frame_uses_sum_checksum_and_little_endian_fields(self):
         status = StatusBits(protocol_name=PROTOCOL_XINCHI)
@@ -471,26 +653,101 @@ class ProtocolHandlerTests(unittest.TestCase):
             "uart",
         )
 
-    def test_supported_protocols_have_byte_descriptions(self):
+    def test_soc_fault_only_bypasses_range_for_protocols_that_encode_it(self):
+        fault_protocols = {
+            PROTOCOL_RUILUN,
+            PROTOCOL_CHANGZHOU_XINSIWEI,
+        }
+
+        for protocol_name in SUPPORTED_PROTOCOLS:
+            with self.subTest(protocol_name=protocol_name):
+                status = StatusBits(
+                    protocol_name=protocol_name,
+                    soc_percent=101,
+                    soc_fault=True,
+                )
+
+                success, frame, error = self.handler.generate_frame_for_preview(
+                    status
+                )
+
+                if protocol_name in fault_protocols:
+                    self.assertTrue(success, error)
+                    self.assertTrue(frame)
+                else:
+                    self.assertFalse(success)
+                    self.assertEqual(frame, [])
+                    self.assertIn("0-100", error)
+
+    def test_soc_range_still_applies_without_fault_encoding(self):
         for protocol_name in (
             PROTOCOL_RUILUN,
-            PROTOCOL_FZ_SIF,
-            PROTOCOL_XINRI,
-            PROTOCOL_HANGZHOU_ANXIAN,
             PROTOCOL_CHANGZHOU_XINSIWEI,
-            PROTOCOL_WUXI_YIGE,
-            PROTOCOL_TAILING_Y34B,
-            PROTOCOL_TAILING_Y34F,
-            PROTOCOL_SHENZHOUXING,
-            PROTOCOL_YADEA,
-            PROTOCOL_YOUYIBAO,
-            PROTOCOL_JINGXIAN,
-            PROTOCOL_DONGWEI_GTXH,
-            PROTOCOL_XINCHI,
-            PROTOCOL_LUYUAN_BMS,
-            PROTOCOL_LITHIUM_BMS,
-            PROTOCOL_BATTERY_SINGLE_WIRE,
         ):
+            with self.subTest(protocol_name=protocol_name):
+                status = StatusBits(
+                    protocol_name=protocol_name,
+                    soc_percent=-1,
+                    soc_fault=False,
+                )
+
+                success, frame, error = self.handler.generate_frame_for_preview(
+                    status
+                )
+
+                self.assertFalse(success)
+                self.assertEqual(frame, [])
+                self.assertIn("0-100", error)
+
+    def test_current_rejects_non_numeric_values_without_crashing(self):
+        for invalid_value in (True, "1", None):
+            with self.subTest(invalid_value=invalid_value):
+                success, frame, error = self.handler.generate_frame_for_preview(
+                    StatusBits(
+                        protocol_name=PROTOCOL_RUILUN,
+                        current_a=invalid_value,
+                    )
+                )
+
+                self.assertFalse(success)
+                self.assertEqual(frame, [])
+                self.assertIn("必须是数值", error)
+
+    def test_generate_frame_rejects_wrong_status_type(self):
+        for invalid_status in (None, {}, "status"):
+            with self.subTest(invalid_status=invalid_status):
+                success, frame, error = self.handler.generate_frame_for_preview(
+                    invalid_status
+                )
+
+                self.assertFalse(success)
+                self.assertEqual(frame, [])
+                self.assertIn("StatusBits", error)
+
+    def test_generate_frame_returns_error_for_malformed_status_field(self):
+        status = StatusBits(protocol_name=PROTOCOL_RUILUN)
+        status.speed_mode = "fast"
+
+        success, frame, error = self.handler.generate_frame_for_preview(status)
+
+        self.assertFalse(success)
+        self.assertEqual(frame, [])
+        self.assertIn("协议状态参数无效", error)
+
+    def test_integer_current_protocol_rejects_fractional_amperes(self):
+        success, frame, error = self.handler.generate_frame_for_preview(
+            StatusBits(
+                protocol_name=PROTOCOL_RUILUN,
+                current_a=1.5,
+            )
+        )
+
+        self.assertFalse(success)
+        self.assertEqual(frame, [])
+        self.assertIn("整数安培", error)
+
+    def test_supported_protocols_have_byte_descriptions(self):
+        for protocol_name in SUPPORTED_PROTOCOLS:
             descriptions = self.handler.get_byte_descriptions(protocol_name)
             self.assertEqual(
                 len(descriptions),

@@ -1,21 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Show contact QR code with optional license info."""
+"""显示联系二维码和可选的授权信息。"""
 
-import os
-import sys
+from typing import Optional
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import QDialog, QFrame, QLabel, QVBoxLayout
 
-
-def resource_path(*parts) -> str:
-    if hasattr(sys, "_MEIPASS"):
-        base_dir = sys._MEIPASS
-    else:
-        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    return os.path.join(base_dir, *parts)
+from app_paths import resource_path
 
 
 class FeedbackDialog(QDialog):
@@ -23,7 +16,7 @@ class FeedbackDialog(QDialog):
         self,
         parent=None,
         remaining_validity_text: str = "未激活",
-        footer_text: str | None = None,
+        footer_text: Optional[str] = None,
     ):
         super().__init__(parent)
         self.remaining_validity_text = remaining_validity_text or "未激活"

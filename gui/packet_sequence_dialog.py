@@ -26,27 +26,20 @@ from PyQt5.QtWidgets import (
 )
 
 from gui.frame_config_dialog import FrameConfigDialog
+from protocol.frame_utils import normalize_frame, validate_frame_length
 
 PACKET_SEQUENCE_FILE_MAGIC = "sifexe.packet_sequence"
 PACKET_SEQUENCE_FILE_VERSION = 1
 
 
 def _normalize_frame(frame, expected_length: Optional[int] = None) -> List[int]:
-    if not isinstance(frame, (list, tuple)):
-        raise ValueError("每一帧必须是整数列表")
+    """兼容旧调用入口，统一使用公共帧校验器。"""
 
-    normalized: List[int] = []
-    for value in frame:
-        if isinstance(value, bool) or not isinstance(value, int):
-            raise ValueError("每一帧必须只包含 0-255 的整数")
-        if value < 0 or value > 255:
-            raise ValueError("每一帧必须只包含 0-255 的整数")
-        normalized.append(value)
-
-    if expected_length is not None and len(normalized) != expected_length:
-        raise ValueError(f"帧长度不匹配，期望 {expected_length} 字节")
-
-    return normalized
+    return normalize_frame(
+        frame,
+        expected_length=expected_length,
+        label="数据帧",
+    )
 
 
 def build_packet_sequence_payload(
@@ -56,9 +49,12 @@ def build_packet_sequence_payload(
     checksum_mode: str = "xor",
     byte_descriptions: Optional[List[str]] = None,
 ):
+    frame_length = validate_frame_length(frame_length)
+    if not isinstance(frames, (list, tuple)):
+        raise ValueError("数据包组必须是帧列表")
     normalized_frames = [
         _normalize_frame(frame, expected_length=frame_length)
-        for frame in (frames or [])
+        for frame in frames
     ]
     if not normalized_frames:
         raise ValueError("至少需要一组数据包")
@@ -76,20 +72,48 @@ def build_packet_sequence_payload(
 
 
 def load_packet_sequence_payload(payload, expected_frame_length: int) -> List[List[int]]:
+    expected_frame_length = validate_frame_length(expected_frame_length, "当前协议帧长度")
+
     if isinstance(payload, dict):
         file_format = payload.get("format")
         if file_format not in (None, PACKET_SEQUENCE_FILE_MAGIC):
             raise ValueError("不支持的包组文件格式")
 
+        file_version = payload.get("version")
+        if file_version is not None and (
+            isinstance(file_version, bool)
+            or not isinstance(file_version, int)
+            or file_version != PACKET_SEQUENCE_FILE_VERSION
+        ):
+            raise ValueError(f"不支持的包组文件版本：{file_version}")
+        if file_format == PACKET_SEQUENCE_FILE_MAGIC and file_version is None:
+            raise ValueError("包组文件中缺少 version 字段")
+
         file_length = payload.get("frame_length")
-        if file_length is not None and file_length != expected_frame_length:
-            raise ValueError(
-                f"文件帧长度为 {file_length} 字节，当前协议需要 {expected_frame_length} 字节"
-            )
+        if file_length is not None:
+            validate_frame_length(file_length, "文件帧长度")
+            if file_length != expected_frame_length:
+                raise ValueError(
+                    f"文件帧长度为 {file_length} 字节，"
+                    f"当前协议需要 {expected_frame_length} 字节"
+                )
 
         frames = payload.get("frames")
         if frames is None:
             raise ValueError("文件中缺少 frames 字段")
+        if not isinstance(frames, (list, tuple)):
+            raise ValueError("文件中的 frames 字段必须是帧列表")
+
+        frame_count = payload.get("frame_count")
+        if frame_count is not None:
+            if (
+                isinstance(frame_count, bool)
+                or not isinstance(frame_count, int)
+                or frame_count < 0
+            ):
+                raise ValueError("文件中的 frame_count 必须是非负整数")
+            if frame_count != len(frames):
+                raise ValueError("文件中的 frame_count 与实际帧数量不一致")
     elif isinstance(payload, list):
         frames = payload
     else:
@@ -122,7 +146,9 @@ class PacketSequenceDialog(QDialog):
         self.default_frame_provider = default_frame_provider
         self.frame_length = len(self.byte_descriptions) or 12
         self.frames: List[List[int]] = [
-            frame.copy() for frame in (initial_frames or []) if frame is not None
+            _normalize_frame(frame, expected_length=self.frame_length)
+            for frame in (initial_frames or [])
+            if frame is not None
         ]
 
         if not self.frames:
@@ -218,12 +244,13 @@ class PacketSequenceDialog(QDialog):
 
     def _make_default_frame(self) -> List[int]:
         if self.default_frame_provider is not None:
-            try:
-                frame_data = self.default_frame_provider()
-                if frame_data:
-                    return frame_data.copy()
-            except Exception:
-                pass
+            frame_data = self.default_frame_provider()
+            if frame_data is None:
+                raise ValueError("当前协议未能生成默认数据帧")
+            return _normalize_frame(
+                frame_data,
+                expected_length=self.frame_length,
+            )
         return [0] * self.frame_length
 
     def _frame_text(self, index: int, frame: List[int]) -> str:
@@ -279,7 +306,11 @@ class PacketSequenceDialog(QDialog):
         return None
 
     def add_current_frame(self):
-        frame = self._make_default_frame()
+        try:
+            frame = self._make_default_frame()
+        except ValueError as exc:
+            QMessageBox.critical(self, "帧生成失败", str(exc))
+            return
         edited = self._open_editor(frame, f"{self.dialog_title} - 新增数据包")
         if edited is None:
             return
@@ -393,7 +424,7 @@ class PacketSequenceDialog(QDialog):
             with open(path, "r", encoding="utf-8-sig") as file_obj:
                 payload = json.load(file_obj)
             imported_frames = load_packet_sequence_payload(payload, self.frame_length)
-        except (OSError, json.JSONDecodeError, ValueError) as exc:
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
             QMessageBox.critical(self, "导入失败", f"包组导入失败：{exc}")
             return
 

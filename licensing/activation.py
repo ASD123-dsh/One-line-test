@@ -11,7 +11,7 @@ import subprocess
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, List, Optional, Tuple
 
 import rsa
 
@@ -297,7 +297,7 @@ def get_default_license_path() -> Path:
     return base_dir / LICENSE_FILE_NAME
 
 
-def _run_identifier_command(command: list[str]) -> str:
+def _run_identifier_command(command: List[str]) -> str:
     """执行设备标识命令，并用短超时避免阻塞应用启动。"""
 
     startupinfo = None
@@ -494,7 +494,7 @@ class ActivationService:
     def is_activated(self) -> bool:
         return self.get_license_info()["activated"]
 
-    def activate(self, activation_code: str) -> tuple[bool, str]:
+    def activate(self, activation_code: str) -> Tuple[bool, str]:
         device_code = self.get_device_code()
         result = inspect_activation_code(
             device_code,

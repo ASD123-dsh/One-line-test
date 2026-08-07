@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QApplication
 
 from serial_comm.serial_manager import (
@@ -92,6 +93,22 @@ class SerialManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.cyclic_data, frame_data)
         self.assertEqual(self.manager.send_interval_ms, 1000)
         mock_start.assert_called_once_with(1000)
+
+    def test_uart_cyclic_send_accepts_50ms_and_rejects_49ms(self):
+        frame_data = [0x01, 0x02]
+
+        success, error = self.manager.start_cyclic_send(frame_data, 49)
+
+        self.assertFalse(success)
+        self.assertEqual(error, "发送间隔必须在50ms-5000ms范围内")
+
+        with patch.object(self.manager.send_timer, "start") as mock_start:
+            success, error = self.manager.start_cyclic_send(frame_data, 50)
+
+        self.assertTrue(success, error)
+        self.assertEqual(self.manager.send_interval_ms, 50)
+        self.assertEqual(self.manager.send_timer.timerType(), Qt.PreciseTimer)
+        mock_start.assert_called_once_with(50)
 
     def test_start_cyclic_send_sequence_accepts_multiple_frames(self):
         frame_sequence = [
@@ -222,7 +239,23 @@ class SerialManagerTests(unittest.TestCase):
         ])
         self.assertTrue(all(item[2] == "uart" for item in sent_frames))
 
-    def test_battery_single_wire_cyclic_send_uses_shared_500_to_5000ms_interval_rules(self):
+    def test_fast_cyclic_send_throttles_ui_updates(self):
+        self.manager.cyclic_frame_sequence = [[0x01, 0x02]]
+        self.manager.cyclic_send_mode = "uart"
+        self.manager.send_interval_ms = 50
+        skip_ui_values = []
+
+        def fake_send(frame_data, skip_ui_update=False, send_mode="uart"):
+            skip_ui_values.append(skip_ui_update)
+            return True, ""
+
+        with patch.object(self.manager, "send_single_frame", side_effect=fake_send):
+            for _ in range(10):
+                self.manager._send_cyclic_data()
+
+        self.assertEqual(skip_ui_values, [True] * 9 + [False])
+
+    def test_direct_battery_single_wire_mode_keeps_500_to_5000ms_interval_rules(self):
         frame_data = [0x00, 0x50, 0x00, 0x00, 0x00, 0x50]
 
         success, error = self.manager.start_cyclic_send(

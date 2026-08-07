@@ -1218,8 +1218,17 @@ class MainWindow(QMainWindow):
         # 发送间隔
         layout.addWidget(QLabel("发送间隔 (ms):"), 0, 0)
         self.interval_spin = QSpinBox()
-        self.interval_spin.setRange(500, 5000)
-        self.interval_spin.setValue(500)
+        self.interval_spin.setRange(
+            DEFAULT_PROTOCOL_DEFINITION.min_send_interval_ms,
+            DEFAULT_PROTOCOL_DEFINITION.max_send_interval_ms,
+        )
+        self.interval_spin.setValue(
+            DEFAULT_PROTOCOL_DEFINITION.default_send_interval_ms
+        )
+        self.interval_spin.setToolTip(
+            "默认 500ms；低于 500ms 时请确认串口吞吐量及转码平台处理能力，"
+            "过快可能造成覆盖或丢帧。"
+        )
         self.interval_spin.valueChanged.connect(self.on_interval_changed)
         layout.addWidget(self.interval_spin, 0, 1)
         

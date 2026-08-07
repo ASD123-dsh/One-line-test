@@ -29,6 +29,11 @@ PROTOCOL_LUYUAN_BMS = "绿源BMS一线通协议"
 PROTOCOL_LITHIUM_BMS = "一线通--锂电池BMS"
 PROTOCOL_BATTERY_SINGLE_WIRE = "电池单线通讯协议"
 
+# 发送周期的软件边界。默认值保持 500ms，仅放宽可配置下限。
+MIN_SEND_INTERVAL_MS = 50
+MAX_SEND_INTERVAL_MS = 5000
+DEFAULT_SEND_INTERVAL_MS = 500
+
 
 @dataclass(frozen=True)
 class ProtocolDefinition:
@@ -41,9 +46,9 @@ class ProtocolDefinition:
     generator_method: str
     preview_generator_method: Optional[str] = None
     soc_fault_value: Optional[int] = None
-    min_send_interval_ms: int = 500
-    max_send_interval_ms: int = 5000
-    default_send_interval_ms: int = 500
+    min_send_interval_ms: int = MIN_SEND_INTERVAL_MS
+    max_send_interval_ms: int = MAX_SEND_INTERVAL_MS
+    default_send_interval_ms: int = DEFAULT_SEND_INTERVAL_MS
     reset_send_interval_on_switch: bool = False
 
     def __post_init__(self):
@@ -91,7 +96,7 @@ class ProtocolDefinition:
                 isinstance(value, bool) or not isinstance(value, int)
                 for value in interval_values
             )
-            or self.min_send_interval_ms <= 0
+            or self.min_send_interval_ms < MIN_SEND_INTERVAL_MS
             or self.max_send_interval_ms < self.min_send_interval_ms
             or not (
                 self.min_send_interval_ms

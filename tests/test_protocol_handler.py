@@ -1,7 +1,12 @@
 from dataclasses import FrozenInstanceError
 import unittest
 
-from protocol.definitions import PROTOCOL_DEFINITIONS, ProtocolDefinition
+from protocol.definitions import (
+    DEFAULT_SEND_INTERVAL_MS,
+    MIN_SEND_INTERVAL_MS,
+    PROTOCOL_DEFINITIONS,
+    ProtocolDefinition,
+)
 from protocol.models import (
     ProtocolConfig as ModelProtocolConfig,
     StatusBits as ModelStatusBits,
@@ -58,6 +63,14 @@ class ProtocolHandlerTests(unittest.TestCase):
                 self.handler.get_protocol_send_mode(protocol_name),
                 definition.send_mode,
             )
+            self.assertEqual(
+                definition.min_send_interval_ms,
+                MIN_SEND_INTERVAL_MS,
+            )
+            self.assertEqual(
+                definition.default_send_interval_ms,
+                DEFAULT_SEND_INTERVAL_MS,
+            )
             self.assertTrue(
                 callable(getattr(self.handler, definition.generator_method))
             )
@@ -74,6 +87,18 @@ class ProtocolHandlerTests(unittest.TestCase):
             PROTOCOL_DEFINITIONS[PROTOCOL_RUILUN].frame_length = 99
 
     def test_protocol_definition_rejects_invalid_interval_policy(self):
+        with self.assertRaisesRegex(ValueError, "发送间隔配置无效"):
+            ProtocolDefinition(
+                name="测试协议",
+                frame_length=12,
+                checksum_mode="xor",
+                send_mode="uart",
+                generator_method="_generate_test_frame",
+                min_send_interval_ms=49,
+                max_send_interval_ms=5000,
+                default_send_interval_ms=500,
+            )
+
         with self.assertRaisesRegex(ValueError, "发送间隔配置无效"):
             ProtocolDefinition(
                 name="测试协议",

@@ -38,12 +38,13 @@ class MainWindowIntervalTests(unittest.TestCase):
         self.window.serial_manager.is_cyclic_sending = Mock(return_value=True)
         self.window.serial_manager.update_cyclic_send_interval = Mock(return_value=(True, ""))
 
-        self.window.interval_spin.setValue(1500)
+        self.window.interval_spin.setValue(50)
 
-        self.window.serial_manager.update_cyclic_send_interval.assert_called_once_with(1500)
+        self.window.serial_manager.update_cyclic_send_interval.assert_called_once_with(50)
 
-    def test_interval_spin_defaults_to_500_for_regular_protocols(self):
-        self.assertEqual(self.window.interval_spin.minimum(), 500)
+    def test_interval_spin_keeps_500_default_and_allows_50ms(self):
+        self.assertEqual(self.window.interval_spin.minimum(), 50)
+        self.assertEqual(self.window.interval_spin.maximum(), 5000)
         self.assertEqual(self.window.interval_spin.value(), 500)
 
     def test_xinchi_protocol_resets_interval_to_500ms(self):
@@ -54,7 +55,7 @@ class MainWindowIntervalTests(unittest.TestCase):
         self.window.current_protocol = PROTOCOL_XINCHI
         self.window.apply_send_interval_constraints()
 
-        self.assertEqual(self.window.interval_spin.minimum(), 500)
+        self.assertEqual(self.window.interval_spin.minimum(), 50)
         self.assertEqual(self.window.interval_spin.maximum(), 5000)
         self.assertEqual(self.window.interval_spin.value(), 500)
 

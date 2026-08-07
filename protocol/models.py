@@ -8,7 +8,7 @@
 
 from dataclasses import dataclass
 
-from .definitions import PROTOCOL_RUILUN
+from .definitions import DEFAULT_SEND_INTERVAL_MS, PROTOCOL_RUILUN
 
 
 @dataclass
@@ -17,7 +17,7 @@ class ProtocolConfig:
 
     tosc_us: int = 100
     baud_rate: int = 9600
-    send_interval_ms: int = 500
+    send_interval_ms: int = DEFAULT_SEND_INTERVAL_MS
 
 
 @dataclass

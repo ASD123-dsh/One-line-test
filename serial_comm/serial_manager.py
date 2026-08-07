@@ -10,8 +10,13 @@ from typing import List, Optional, Tuple
 
 import serial
 import serial.tools.list_ports
-from PyQt5.QtCore import QObject, QTimer, pyqtSignal
+from PyQt5.QtCore import QObject, Qt, QTimer, pyqtSignal
 
+from protocol.definitions import (
+    DEFAULT_SEND_INTERVAL_MS,
+    MAX_SEND_INTERVAL_MS,
+    MIN_SEND_INTERVAL_MS,
+)
 from protocol.frame_utils import normalize_frame
 
 
@@ -32,8 +37,13 @@ SEND_MODE_FRAME_LENGTHS = {
     SEND_MODE_LUYUAN_BMS_SIF: 15,
     SEND_MODE_JINGXIAN_SIF: 12,
 }
-MIN_SEND_INTERVAL_MS = 500
-MAX_SEND_INTERVAL_MS = 5000
+# 直接在 PC 端模拟单线波形会阻塞发送线程，继续保留原 500ms 安全下限。
+DIRECT_SIF_MIN_SEND_INTERVAL_MS = 500
+SEND_MODE_MIN_INTERVALS = {
+    SEND_MODE_BATTERY_SINGLE_WIRE: DIRECT_SIF_MIN_SEND_INTERVAL_MS,
+    SEND_MODE_LUYUAN_BMS_SIF: DIRECT_SIF_MIN_SEND_INTERVAL_MS,
+    SEND_MODE_JINGXIAN_SIF: DIRECT_SIF_MIN_SEND_INTERVAL_MS,
+}
 
 
 @dataclass
@@ -71,13 +81,14 @@ class SerialManager(QObject):
         self.serial_port: Optional[serial.Serial] = None
         self.is_connected = False
         self.send_timer = QTimer(self)
+        self.send_timer.setTimerType(Qt.PreciseTimer)
         self.send_timer.timeout.connect(self._send_cyclic_data)
 
         self.cyclic_data: Optional[List[int]] = None
         self.cyclic_frame_sequence: List[List[int]] = []
         self.cyclic_frame_index = 0
         self.cyclic_send_mode = SEND_MODE_UART
-        self.send_interval_ms = 500
+        self.send_interval_ms = DEFAULT_SEND_INTERVAL_MS
         self.cyclic_min_interval_ms = MIN_SEND_INTERVAL_MS
         self.cyclic_max_interval_ms = MAX_SEND_INTERVAL_MS
         self.tosc_us = 100
@@ -406,7 +417,7 @@ class SerialManager(QObject):
             or not isinstance(min_interval_ms, int)
             or isinstance(max_interval_ms, bool)
             or not isinstance(max_interval_ms, int)
-            or min_interval_ms <= 0
+            or min_interval_ms < MIN_SEND_INTERVAL_MS
             or max_interval_ms < min_interval_ms
         ):
             return "发送间隔约束配置无效"
@@ -453,6 +464,16 @@ class SerialManager(QObject):
         if not isinstance(send_mode, str) or send_mode not in SUPPORTED_SEND_MODES:
             return False, f"不支持的发送模式: {send_mode}"
 
+        effective_min_interval_ms = min_interval_ms
+        if (
+            not isinstance(min_interval_ms, bool)
+            and isinstance(min_interval_ms, int)
+        ):
+            effective_min_interval_ms = max(
+                min_interval_ms,
+                SEND_MODE_MIN_INTERVALS.get(send_mode, MIN_SEND_INTERVAL_MS),
+            )
+
         normalized_frames: List[List[int]] = []
         for index, frame_data in enumerate(frame_sequence, start=1):
             normalized_frame, error_msg = self._normalize_frame_for_mode(
@@ -466,7 +487,7 @@ class SerialManager(QObject):
 
         interval_error = self._validate_send_interval(
             interval_ms,
-            min_interval_ms,
+            effective_min_interval_ms,
             max_interval_ms,
         )
         if interval_error:
@@ -477,7 +498,7 @@ class SerialManager(QObject):
         self.cyclic_frame_index = 0
         self.cyclic_send_mode = send_mode
         self.send_interval_ms = interval_ms
-        self.cyclic_min_interval_ms = min_interval_ms
+        self.cyclic_min_interval_ms = effective_min_interval_ms
         self.cyclic_max_interval_ms = max_interval_ms
         self.send_count = 0
 

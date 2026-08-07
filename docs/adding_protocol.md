@@ -53,7 +53,7 @@ PROTOCOL_DEFINITIONS = MappingProxyType({
         send_mode="uart",
         generator_method="_generate_vendor_model_frame",
         preview_generator_method="_generate_vendor_model_frame_for_preview",
-        min_send_interval_ms=500,
+        min_send_interval_ms=50,
         max_send_interval_ms=5000,
         default_send_interval_ms=500,
     ),
@@ -63,6 +63,12 @@ PROTOCOL_DEFINITIONS = MappingProxyType({
 上面的长度、校验和发送方式只是结构示意，不能直接复制为新协议参数。
 `PROTOCOL_DEFINITIONS` 是不可变映射，`SUPPORTED_PROTOCOLS` 由其键顺序生成；
 不要在运行期修改注册表，也不要另建一份协议名称清单。
+
+当前软件允许的最小周期为 `50ms`，默认周期仍为 `500ms`。降低下限只是开放
+配置能力，不代表所有协议或转码平台都能稳定使用 `50ms`。协议周期必须大于串口
+发送耗时，并为硬件平台接收、转码和转发留出余量；Windows 定时器也不能作为
+硬实时保证。直接由 PC 串口控制 BREAK 模拟单线波形的兼容模式继续保留
+`500ms` 下限。
 
 当前注册表中的协议为兼容原功能都使用 `send_mode="uart"`。即使规格书描述了
 单线脉宽，也不能在未核对转码硬件、固件接口和串口控制能力时擅自切换发送方式。

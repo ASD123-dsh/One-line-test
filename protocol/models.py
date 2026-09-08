@@ -176,3 +176,9 @@ class StatusBits:
     lithium_bms_total_voltage_v: float = 48.0
     lithium_bms_max_cell_voltage_v: float = 3.60
     lithium_bms_min_cell_voltage_v: float = 3.40
+
+    # SXSY 一线通
+    # 新协议字段追加在模型末尾，避免改变既有位置参数的字段顺序。
+    # 0x00 用于规格书示例；0x0F/0x0D/0x0E 分别表示无 P 档、P 档常亮和闪烁。
+    sxsy_p_gear_state: int = 0x00
+    sxsy_three_speed: bool = False

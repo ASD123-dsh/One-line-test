@@ -10,6 +10,7 @@ from gui.main_window import MainWindow
 from protocol.protocol_handler import (
     PROTOCOL_BATTERY_SINGLE_WIRE,
     PROTOCOL_SHENZHOUXING,
+    PROTOCOL_SXSY,
     PROTOCOL_XINCHI,
     PROTOCOL_XINRI,
     SUPPORTED_PROTOCOLS,
@@ -138,6 +139,75 @@ class MainWindowShenzhouxingTests(unittest.TestCase):
         success, frame, error = self.window.generate_protocol_frame_for_preview(derived)
         self.assertTrue(success, error)
         self.assertEqual(frame[5], 0xFF)
+
+
+class MainWindowSxsyTests(unittest.TestCase):
+    """验证 SXSY 专用字段和通用状态页的往返映射。"""
+
+    def setUp(self):
+        detector_patch = patch.object(
+            SerialPortDetector,
+            "start_detection",
+            autospec=True,
+        )
+        detector_patch.start()
+        self.addCleanup(detector_patch.stop)
+
+        self.window = MainWindow()
+        self.window.history_update_timer.stop()
+        self.addCleanup(self.window.history_update_timer.stop)
+        self.addCleanup(self.window.port_detector.stop_detection)
+        self.addCleanup(self.window.close)
+        self.window.on_protocol_changed(PROTOCOL_SXSY)
+
+    def test_sxsy_ui_exposes_documented_p_gear_and_data_fields(self):
+        self.assertEqual(
+            self.window.distance_mode_cb.text(),
+            "示例默认/未指定 (0x00)",
+        )
+        self.assertEqual(self.window.speed_alarm_cb.text(), "无P档 (0x0F)")
+        self.assertEqual(self.window.p_gear_protect_cb.text(), "P档常亮 (0x0D)")
+        self.assertEqual(self.window.tcs_status_cb.text(), "P档闪烁 (0x0E)")
+        self.assertTrue(self.window.sxsy_p_gear_group.exclusive())
+        self.assertEqual(self.window.sxsy_p_gear_group.checkedId(), 0x00)
+        self.assertFalse(self.window.status2_d7_cb.isEnabled())
+        self.assertEqual(self.window.gear_four_cb.text(), "三速功能 (D7)")
+        self.assertFalse(self.window.current_70_flag_cb.isEnabled())
+        self.assertEqual(self.window.current_spin.minimum(), -127)
+        self.assertEqual(self.window.current_spin.maximum(), 127)
+        self.assertIn("电压比例", self.window.status8_label.text())
+        self.assertEqual(self.window.sxsy_soc_spin.minimum(), 0)
+        self.assertEqual(self.window.sxsy_soc_spin.maximum(), 100)
+        self.assertFalse(hasattr(self.window, "voltage_group"))
+
+    def test_sxsy_ui_round_trip_matches_protocol_bytes(self):
+        self.window.sxsy_p_gear_group.button(0x0E).setChecked(True)
+        self.window.gear_four_cb.setChecked(True)
+        self.window.hall_fault_cb.setChecked(True)
+        self.window.motor_running_cb.setChecked(True)
+        self.window.speed_mode_spin.setValue(3)
+        self.window.current_spin.setValue(-5)
+        self.window.hall_count_spin.setValue(0x1234)
+        self.window.soc_spin.setValue(80)
+        self.window.sxsy_soc_spin.setValue(70)
+
+        status = self.window.get_current_status_from_ui()
+        self.assertEqual(status.protocol_name, PROTOCOL_SXSY)
+        self.assertEqual(status.sxsy_p_gear_state, 0x0E)
+        self.assertTrue(status.sxsy_three_speed)
+        self.assertEqual(status.voltage_percentage, 80)
+        self.assertEqual(status.soc_percent, 70)
+
+        self.window.protocol_handler.reset_sxsy_sequence(1)
+        success, frame, error = self.window.generate_protocol_frame_for_preview(
+            status
+        )
+
+        self.assertTrue(success, error)
+        self.assertEqual(frame[0:3], [0x30, 0x01, 0x0E])
+        self.assertEqual(frame[6], 0x85)
+        self.assertEqual(frame[7:11], [0x76, 0x98, 0xB4, 0xAA])
+        self.assertEqual(self.window.protocol_handler.get_current_sxsy_sequence(), 1)
 
 
 class MainWindowProtocolSwitchTests(unittest.TestCase):

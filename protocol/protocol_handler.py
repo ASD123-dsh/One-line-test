@@ -21,6 +21,7 @@ from .definitions import (
     PROTOCOL_LUYUAN_BMS,
     PROTOCOL_RUILUN,
     PROTOCOL_SHENZHOUXING,
+    PROTOCOL_SXSY,
     PROTOCOL_TAILING_Y34B,
     PROTOCOL_TAILING_Y34F,
     PROTOCOL_WUXI_YIGE,
@@ -42,6 +43,7 @@ VOLTAGE_OPTIONS = (
     ("voltage_84v", 0x40),
     ("voltage_96v", 0x80),
 )
+SXSY_P_GEAR_STATES = frozenset((0x00, 0x0D, 0x0E, 0x0F))
 
 
 class ProtocolHandler:
@@ -52,6 +54,7 @@ class ProtocolHandler:
         self.status = StatusBits()
         self._xinsiwei_sequence_counter = 1
         self._hangzhou_sequence_counter = 1
+        self._sxsy_sequence_counter = 1
         self._jingxian_sequence_counter = 1
 
     def resolve_protocol_name(self, status: StatusBits) -> str:
@@ -126,6 +129,29 @@ class ProtocolHandler:
             raise ValueError("杭州安显序号起始值必须在 1-4095 范围内")
         self._hangzhou_sequence_counter = start_value
 
+    def get_current_sxsy_sequence(self) -> int:
+        """获取当前 SXSY 12 位流水号。"""
+
+        return self._sxsy_sequence_counter
+
+    def get_next_sxsy_sequence(self) -> int:
+        """获取当前 SXSY 流水号，并按 12 位规则递增。"""
+
+        current_seq = self._sxsy_sequence_counter
+        self._sxsy_sequence_counter = (current_seq + 1) & 0x0FFF
+        return current_seq
+
+    def reset_sxsy_sequence(self, start_value: int = 1):
+        """重置 SXSY 流水号。"""
+
+        if (
+            isinstance(start_value, bool)
+            or not isinstance(start_value, int)
+            or not (0 <= start_value <= 0x0FFF)
+        ):
+            raise ValueError("SXSY 流水号起始值必须在 0-4095 范围内")
+        self._sxsy_sequence_counter = start_value
+
     def get_current_jingxian_sequence(self) -> int:
         """获取当前精显协议序号。"""
 
@@ -156,6 +182,17 @@ class ProtocolHandler:
         if isinstance(status.current_a, bool) or not isinstance(status.current_a, (int, float)):
             return False, "运行电流必须是数值"
         current_a = float(status.current_a)
+
+        if protocol_name == PROTOCOL_SXSY:
+            integer_fields = (
+                ("速度模式", status.speed_mode),
+                ("霍尔计数", status.hall_count),
+                ("电压百分比", status.voltage_percentage),
+                ("SOC", status.soc_percent),
+            )
+            for field_label, field_value in integer_fields:
+                if isinstance(field_value, bool) or not isinstance(field_value, int):
+                    return False, f"SXSY {field_label}必须是整数"
 
         speed_mode_max = (
             7
@@ -192,6 +229,16 @@ class ProtocolHandler:
 
         if not (-128 <= current_a <= 127):
             return False, "运行电流必须在 -128A 到 127A 范围内"
+
+        if protocol_name == PROTOCOL_SXSY:
+            if not (-127 <= current_a <= 127):
+                return False, "SXSY 运行电流必须在 -127A 到 127A 范围内"
+            if (
+                isinstance(status.sxsy_p_gear_state, bool)
+                or not isinstance(status.sxsy_p_gear_state, int)
+                or status.sxsy_p_gear_state not in SXSY_P_GEAR_STATES
+            ):
+                return False, "SXSY P档状态必须是 0x00、0x0D、0x0E 或 0x0F"
 
         if not (0 <= status.hall_count <= 65535):
             return False, "霍尔计数必须在 0-65535 范围内"
@@ -359,6 +406,28 @@ class ProtocolHandler:
         pulse &= 0x7F
         return pulse
 
+    def sxsy_pluscode_encrypt(self, sequence: int) -> int:
+        """根据 SXSY 12 位流水号生成 7 位 PlusCode。"""
+
+        if (
+            isinstance(sequence, bool)
+            or not isinstance(sequence, int)
+            or not (0 <= sequence <= 0x0FFF)
+        ):
+            raise ValueError("SXSY 流水号必须在 0-4095 范围内")
+
+        seq_low = sequence & 0xFF
+        seq_high = (sequence >> 8) & 0x0F
+        plus_code = (seq_low + 0x13) & 0xFF
+        plus_code ^= 0x95
+        plus_code = (plus_code + 0x97) & 0xFF
+        plus_code ^= 0x6A
+        plus_code = (plus_code + seq_high) & 0xFF
+        plus_code ^= 0xFB
+        plus_code = (plus_code + 0x45) & 0xFF
+        plus_code ^= 0xAA
+        return plus_code & 0x7F
+
     def jingxian_pluscode_encrypt(self, sequence: int) -> int:
         """精显协议 PlusCod 加密算法。"""
 
@@ -495,6 +564,57 @@ class ProtocolHandler:
         frame[9] = ((status.voltage_percentage & 0xFF) + pulse) & 0xFF
         frame[10] = (self._encode_voltage_mask(status) + pulse) & 0xFF
         frame[11] = self._xor_checksum(frame[:11])
+        return True, frame, ""
+
+    def _generate_sxsy_frame_for_send(
+        self, status: StatusBits
+    ) -> Tuple[bool, List[int], str]:
+        """生成 SXSY 发送帧，并在成功校验后递增流水号。"""
+
+        return self._generate_sxsy_frame(status, preview=False)
+
+    def _generate_sxsy_frame_for_preview(
+        self, status: StatusBits
+    ) -> Tuple[bool, List[int], str]:
+        """生成 SXSY 预览帧，不消耗流水号。"""
+
+        return self._generate_sxsy_frame(status, preview=True)
+
+    def _generate_sxsy_frame(
+        self, status: StatusBits, preview: bool
+    ) -> Tuple[bool, List[int], str]:
+        """按 SXSY 规格生成 12 字节应用层载荷。"""
+
+        is_valid, error_msg = self.validate_status_bits(status)
+        if not is_valid:
+            return False, [], error_msg
+
+        sequence = self.get_current_sxsy_sequence()
+        plus_code = self.sxsy_pluscode_encrypt(sequence)
+        hall_count = self._resolve_hall_count(status)
+
+        frame = [0] * 12
+        frame[0] = 0x30
+        frame[1] = sequence & 0xFF
+        frame[2] = (
+            (((sequence >> 8) & 0x0F) << 4)
+            | self._encode_sxsy_status1(status)
+        )
+        frame[3] = (self._encode_generic_status2(status) + plus_code) & 0xFF
+        frame[4] = (self._encode_sxsy_status3(status) + plus_code) & 0xFF
+        frame[5] = (
+            self._encode_generic_status4(status, PROTOCOL_SXSY) + plus_code
+        ) & 0xFF
+        # 文档仅给出最高位符号规则，此处按“符号位 + 7 位幅值”编码。
+        frame[6] = self._encode_sign_magnitude_byte(status.current_a)
+        frame[7] = (((hall_count >> 8) & 0xFF) + plus_code) & 0xFF
+        frame[8] = ((hall_count & 0xFF) + plus_code) & 0xFF
+        frame[9] = ((status.voltage_percentage & 0xFF) + plus_code) & 0xFF
+        frame[10] = ((status.soc_percent & 0xFF) + plus_code) & 0xFF
+        frame[11] = self._xor_checksum(frame[:11])
+        if not preview:
+            # 仅在整帧成功生成后提交流水号，畸形参数不得消耗发送序号。
+            self.get_next_sxsy_sequence()
         return True, frame, ""
 
     def generate_xinsiwei_frame_with_auto_sequence(
@@ -868,6 +988,30 @@ class ProtocolHandler:
             value |= 0x04
         if status.p_gear_protect:
             value |= 0x02
+        return value
+
+    def _encode_sxsy_status1(self, status: StatusBits) -> int:
+        """编码 SXSY P 档枚举；0x00 用于兼容规格书示例。"""
+
+        return status.sxsy_p_gear_state & 0x0F
+
+    def _encode_sxsy_status3(self, status: StatusBits) -> int:
+        """编码 SXSY 三速、运行状态和档位组合。"""
+
+        value = 0
+        if status.sxsy_three_speed:
+            value |= 0x80
+        if status.motor_running:
+            value |= 0x40
+        if status.brake:
+            value |= 0x20
+        if status.controller_protect:
+            value |= 0x10
+        if status.regen_charging:
+            value |= 0x08
+        if status.anti_runaway:
+            value |= 0x04
+        value |= status.speed_mode & 0x03
         return value
 
     def _encode_yige_status1(self, status: StatusBits) -> int:
@@ -1454,6 +1598,20 @@ class ProtocolHandler:
                 "Status9 协议切换电压 + Pulse",
                 "校验和 (XOR)",
             ],
+            PROTOCOL_SXSY: [
+                "设备编码 (固定 0x30)",
+                "12 位流水号低 8 位 (自动递增)",
+                "流水号高 4 位 + Status1 P档状态",
+                "Status2 + PlusCode",
+                "Status3 + PlusCode",
+                "Status4 + PlusCode",
+                "Status5 运行电流 (不加密)",
+                "Status6 霍尔计数高字节 + PlusCode",
+                "Status7 霍尔计数低字节 + PlusCode",
+                "Status8 电压比例 + PlusCode",
+                "Status9 SOC + PlusCode",
+                "校验和 (XOR)",
+            ],
             PROTOCOL_XINRI: [
                 "设备编码 (固定 0x08)",
                 "流水号低 8 位 (固定 0x61)",
@@ -1808,6 +1966,53 @@ class PresetScenarios:
         status.under_voltage = True
         status.over_current = True
         status.speed_limit = True
+        return status
+
+    @staticmethod
+    def sxsy_normal_running() -> StatusBits:
+        """SXSY 正常运行预设。"""
+
+        status = StatusBits(protocol_name=PROTOCOL_SXSY)
+        status.sxsy_p_gear_state = 0x00
+        status.sxsy_three_speed = True
+        status.motor_running = True
+        status.speed_mode = 2
+        status.current_a = 12
+        status.hall_count = 3000
+        status.voltage_percentage = 80
+        status.soc_percent = 80
+        return status
+
+    @staticmethod
+    def sxsy_energy_recovery() -> StatusBits:
+        """SXSY 能量回收预设。"""
+
+        status = StatusBits(protocol_name=PROTOCOL_SXSY)
+        status.sxsy_p_gear_state = 0x00
+        status.sxsy_three_speed = True
+        status.regen_charging = True
+        status.speed_mode = 2
+        status.current_a = -3
+        status.hall_count = 2400
+        status.voltage_percentage = 70
+        status.soc_percent = 60
+        return status
+
+    @staticmethod
+    def sxsy_fault_scenario() -> StatusBits:
+        """SXSY 故障预设。"""
+
+        status = StatusBits(protocol_name=PROTOCOL_SXSY)
+        status.sxsy_p_gear_state = 0x0F
+        status.hall_fault = True
+        status.throttle_fault = True
+        status.controller_fault = True
+        status.under_voltage = True
+        status.controller_protect = True
+        status.current_a = 0
+        status.hall_count = 0
+        status.voltage_percentage = 20
+        status.soc_percent = 20
         return status
 
     @staticmethod

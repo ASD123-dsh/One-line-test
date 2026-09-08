@@ -22,6 +22,7 @@ from protocol.definitions import (
     PROTOCOL_LUYUAN_BMS,
     PROTOCOL_RUILUN,
     PROTOCOL_SHENZHOUXING,
+    PROTOCOL_SXSY,
     PROTOCOL_TAILING_Y34B,
     PROTOCOL_TAILING_Y34F,
     PROTOCOL_WUXI_YIGE,
@@ -61,6 +62,11 @@ PROTOCOL_UI_SPECS: Mapping[str, ProtocolUiSpec] = MappingProxyType({
     PROTOCOL_HANGZHOU_ANXIAN: ProtocolUiSpec(
         "switch_to_hangzhou_anxian_protocol",
         "load_hangzhou_anxian_preset_scenario",
+        "get_ruilun_status_from_ui",
+    ),
+    PROTOCOL_SXSY: ProtocolUiSpec(
+        "switch_to_sxsy_protocol",
+        "load_sxsy_preset_scenario",
         "get_ruilun_status_from_ui",
     ),
     PROTOCOL_CHANGZHOU_XINSIWEI: ProtocolUiSpec(

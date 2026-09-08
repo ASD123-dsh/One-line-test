@@ -15,6 +15,7 @@ PROTOCOL_RUILUN = "瑞轮协议"
 PROTOCOL_FZ_SIF = "FZ-sif协议"
 PROTOCOL_XINRI = "新日协议"
 PROTOCOL_HANGZHOU_ANXIAN = "杭州安显协议"
+PROTOCOL_SXSY = "SXSY一线通协议"
 PROTOCOL_CHANGZHOU_XINSIWEI = "常州新思维协议"
 PROTOCOL_WUXI_YIGE = "无锡一格Y67协议"
 PROTOCOL_TAILING_Y34B = "无锡台铃Y34B协议"
@@ -138,6 +139,14 @@ PROTOCOL_DEFINITIONS: Mapping[str, ProtocolDefinition] = MappingProxyType({
         send_mode="uart",
         generator_method="_generate_hangzhou_frame_for_send",
         preview_generator_method="_generate_hangzhou_frame_for_preview",
+    ),
+    PROTOCOL_SXSY: ProtocolDefinition(
+        name=PROTOCOL_SXSY,
+        frame_length=12,
+        checksum_mode="xor",
+        send_mode="uart",
+        generator_method="_generate_sxsy_frame_for_send",
+        preview_generator_method="_generate_sxsy_frame_for_preview",
     ),
     PROTOCOL_CHANGZHOU_XINSIWEI: ProtocolDefinition(
         name=PROTOCOL_CHANGZHOU_XINSIWEI,

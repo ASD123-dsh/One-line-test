@@ -32,6 +32,7 @@ from protocol.protocol_handler import (
     PROTOCOL_TAILING_Y34B,
     PROTOCOL_TAILING_Y34F,
     PROTOCOL_SHENZHOUXING,
+    PROTOCOL_SXSY,
     PROTOCOL_WUXI_YIGE,
     PROTOCOL_XINCHI,
     PROTOCOL_XINRI,
@@ -477,6 +478,14 @@ class MainWindow(QMainWindow):
                 ("P档 (D1)", True),
                 ("备用 (D0)", False),
             ]
+        elif protocol == PROTOCOL_SXSY:
+            # 规格书正文定义 D/E/F，四条官方样例使用 0，均显式保留。
+            labels = [
+                ("示例默认/未指定 (0x00)", True),
+                ("无P档 (0x0F)", True),
+                ("P档常亮 (0x0D)", True),
+                ("P档闪烁 (0x0E)", True),
+            ]
         elif protocol == PROTOCOL_XINRI:
             labels = [
                 ("P档 (D3)", True),
@@ -548,15 +557,19 @@ class MainWindow(QMainWindow):
                 ("TCS状态 (D0) - 1=亮/0=灭", True),
             ]
 
-        self.distance_mode_cb = QCheckBox(labels[0][0])
+        status1_button_class = (
+            QRadioButton if protocol == PROTOCOL_SXSY else QCheckBox
+        )
+
+        self.distance_mode_cb = status1_button_class(labels[0][0])
         self.distance_mode_cb.setEnabled(labels[0][1])
         layout.addWidget(self.distance_mode_cb, 0, 0)
         
-        self.speed_alarm_cb = QCheckBox(labels[1][0])
+        self.speed_alarm_cb = status1_button_class(labels[1][0])
         self.speed_alarm_cb.setEnabled(labels[1][1])
         layout.addWidget(self.speed_alarm_cb, 0, 1)
         
-        self.p_gear_protect_cb = QCheckBox(labels[2][0])
+        self.p_gear_protect_cb = status1_button_class(labels[2][0])
         self.p_gear_protect_cb.setEnabled(labels[2][1])
         layout.addWidget(
             self.p_gear_protect_cb,
@@ -564,13 +577,24 @@ class MainWindow(QMainWindow):
             2 if protocol == PROTOCOL_HANGZHOU_ANXIAN else 0,
         )
         
-        self.tcs_status_cb = QCheckBox(labels[3][0])
+        self.tcs_status_cb = status1_button_class(labels[3][0])
         self.tcs_status_cb.setEnabled(labels[3][1])
         layout.addWidget(
             self.tcs_status_cb,
             0 if protocol == PROTOCOL_HANGZHOU_ANXIAN else 1,
             3 if protocol == PROTOCOL_HANGZHOU_ANXIAN else 1,
         )
+
+        if protocol == PROTOCOL_SXSY:
+            self.sxsy_p_gear_group = QButtonGroup(widget)
+            for state_code, button in (
+                (0x00, self.distance_mode_cb),
+                (0x0F, self.speed_alarm_cb),
+                (0x0D, self.p_gear_protect_cb),
+                (0x0E, self.tcs_status_cb),
+            ):
+                self.sxsy_p_gear_group.addButton(button, state_code)
+            self.distance_mode_cb.setChecked(True)
         
         return widget
     
@@ -676,23 +700,30 @@ class MainWindow(QMainWindow):
             layout.setHorizontalSpacing(18)
             layout.setVerticalSpacing(6)
 
-        d7_text = (
-            "速度模式高位 (D7)"
-            if self.current_protocol in {
-                PROTOCOL_XINRI,
-                PROTOCOL_YADEA,
-                PROTOCOL_JINGXIAN,
-                PROTOCOL_DONGWEI_GTXH,
-            }
-            else "四档指示 (D7)"
-        )
-        speed_mode_label = (
-            "档位模式 (D7+D1~D0):"
-            if self.current_protocol == PROTOCOL_DONGWEI_GTXH
-            else "速度模式 (D7+D1~D0):"
-            if self.current_protocol in {PROTOCOL_XINRI, PROTOCOL_YADEA, PROTOCOL_JINGXIAN}
-            else "三速模式 (D1~D0):"
-        )
+        if self.current_protocol == PROTOCOL_SXSY:
+            d7_text = "三速功能 (D7)"
+        else:
+            d7_text = (
+                "速度模式高位 (D7)"
+                if self.current_protocol in {
+                    PROTOCOL_XINRI,
+                    PROTOCOL_YADEA,
+                    PROTOCOL_JINGXIAN,
+                    PROTOCOL_DONGWEI_GTXH,
+                }
+                else "四档指示 (D7)"
+            )
+        if self.current_protocol == PROTOCOL_SXSY:
+            speed_mode_label = "档位编码 (D1~D0：0=N档/1=D档/2=中速/3=高速):"
+        else:
+            speed_mode_label = (
+                "档位模式 (D7+D1~D0):"
+                if self.current_protocol == PROTOCOL_DONGWEI_GTXH
+                else "速度模式 (D7+D1~D0):"
+                if self.current_protocol
+                in {PROTOCOL_XINRI, PROTOCOL_YADEA, PROTOCOL_JINGXIAN}
+                else "三速模式 (D1~D0):"
+            )
 
         self.gear_four_cb = QCheckBox(d7_text)
         layout.addWidget(self.gear_four_cb, 0, 0)
@@ -767,6 +798,10 @@ class MainWindow(QMainWindow):
             }
             else 3,
         )
+        if self.current_protocol == PROTOCOL_SXSY:
+            self.speed_mode_spin.setToolTip(
+                "0=N档，1=D档，2=中速（文档默认），3=高速"
+            )
         layout.addWidget(
             self.speed_mode_spin,
             2 if self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN else 3,
@@ -958,6 +993,7 @@ class MainWindow(QMainWindow):
             "voltage_96v_rb",
             "status8_label",
             "soc_spin",
+            "sxsy_soc_spin",
             "lithium_soc_mode_cb",
         ):
             if hasattr(self, attr_name):
@@ -968,6 +1004,8 @@ class MainWindow(QMainWindow):
             current_label = "运行电流幅值 (0~51.0A，0.2A/LSB):"
         elif protocol == PROTOCOL_DONGWEI_GTXH:
             current_label = "运行电流 (A，发送按 0.2A/LSB 编码):"
+        elif protocol == PROTOCOL_SXSY:
+            current_label = "运行电流 (A，最高位为符号位):"
         else:
             current_label = "运行电流 (A):"
         layout.addWidget(QLabel(current_label), 0, 0)
@@ -981,7 +1019,10 @@ class MainWindow(QMainWindow):
                 self.current_spin.setRange(-25.6, 25.4)
         else:
             self.current_spin = QSpinBox()
-            self.current_spin.setRange(-128, 127)
+            self.current_spin.setRange(
+                -127 if protocol == PROTOCOL_SXSY else -128,
+                127,
+            )
         self.current_spin.setValue(0)
         layout.addWidget(self.current_spin, 0, 1)
         
@@ -1008,7 +1049,9 @@ class MainWindow(QMainWindow):
             self.speed_spin.setEnabled(False)
             return widget
         
-        if protocol == PROTOCOL_HANGZHOU_ANXIAN:
+        if protocol == PROTOCOL_SXSY:
+            status8_text = "电压比例 (Status8，0~100%):"
+        elif protocol == PROTOCOL_HANGZHOU_ANXIAN:
             status8_text = "电压百分比 (Status8):"
         elif protocol == PROTOCOL_FZ_SIF:
             status8_text = "电池电量/电压比例值 (Status8):"
@@ -1054,6 +1097,14 @@ class MainWindow(QMainWindow):
         layout.addLayout(status8_layout, 3, 1)
 
         row_index = 4
+        if protocol == PROTOCOL_SXSY:
+            layout.addWidget(QLabel("电池SOC (Status9，0~100%):"), row_index, 0)
+            self.sxsy_soc_spin = QSpinBox()
+            self.sxsy_soc_spin.setRange(0, 100)
+            self.sxsy_soc_spin.setValue(50)
+            layout.addWidget(self.sxsy_soc_spin, row_index, 1)
+            return widget
+
         if protocol in {PROTOCOL_YADEA, PROTOCOL_YOUYIBAO, PROTOCOL_JINGXIAN, PROTOCOL_DONGWEI_GTXH}:
             layout.addWidget(QLabel("电流百分比 (Status9):"), row_index, 0)
             self.current_percent_spin = QSpinBox()
@@ -1375,6 +1426,10 @@ class MainWindow(QMainWindow):
         self.speed_spin.valueChanged.connect(self.update_current_frame_display)
         if getattr(self, "soc_spin", None) is not None:
             self.soc_spin.valueChanged.connect(self.update_current_frame_display)
+        if getattr(self, "sxsy_soc_spin", None) is not None:
+            self.sxsy_soc_spin.valueChanged.connect(
+                self.update_current_frame_display
+            )
         if getattr(self, "lithium_soc_mode_cb", None) is not None:
             self.lithium_soc_mode_cb.toggled.connect(self.update_current_frame_display)
         if getattr(self, "soc_fault_cb", None) is not None:
@@ -1578,6 +1633,14 @@ class MainWindow(QMainWindow):
         self.show_hangzhou_anxian_status_config()
         
         # 重置为正常运行场景
+        self.normal_radio.setChecked(True)
+        self.on_scenario_changed()
+
+    def switch_to_sxsy_protocol(self):
+        """切换到 SXSY 一线通协议。"""
+
+        self.current_status = PresetScenarios.sxsy_normal_running()
+        self.show_ruilun_status_config()
         self.normal_radio.setChecked(True)
         self.on_scenario_changed()
     
@@ -2736,6 +2799,20 @@ class MainWindow(QMainWindow):
         # 更新UI显示（复用瑞轮协议的UI更新逻辑）
         self.update_ruilun_ui_from_status()
 
+    def load_sxsy_preset_scenario(self, scenario_id):
+        """加载 SXSY 一线通协议预设场景。"""
+
+        if scenario_id == 0:
+            self.current_status = PresetScenarios.sxsy_normal_running()
+        elif scenario_id == 1:
+            self.current_status = PresetScenarios.sxsy_energy_recovery()
+        elif scenario_id == 2:
+            self.current_status = PresetScenarios.sxsy_fault_scenario()
+        else:
+            self.current_status = StatusBits(protocol_name=PROTOCOL_SXSY)
+
+        self.update_ruilun_ui_from_status()
+
     def load_wuxi_yige_preset_scenario(self, scenario_id):
         """加载无锡一格 Y67 协议预设场景"""
         if scenario_id == 0:
@@ -3012,6 +3089,12 @@ class MainWindow(QMainWindow):
             self.speed_alarm_cb.setChecked(getattr(status, "protocol_speed_limit", False))
             self.p_gear_protect_cb.setChecked(getattr(status, "p_gear_protect", False))
             self.tcs_status_cb.setChecked(False)
+        elif self.current_protocol == PROTOCOL_SXSY:
+            state_code = getattr(status, "sxsy_p_gear_state", 0x00)
+            state_button = self.sxsy_p_gear_group.button(state_code)
+            if state_button is None:
+                state_button = self.sxsy_p_gear_group.button(0x00)
+            state_button.setChecked(True)
         elif self.current_protocol == PROTOCOL_FZ_SIF:
             self.distance_mode_cb.setChecked(getattr(status, "side_stand", False))
             self.speed_alarm_cb.setChecked(getattr(status, "protocol_speed_limit", False))
@@ -3068,7 +3151,12 @@ class MainWindow(QMainWindow):
         if self.current_protocol == PROTOCOL_SHENZHOUXING:
             self.status2_d7_cb.setChecked(getattr(status, "shenzhouxing_tcs", False))
 
-        self.gear_four_cb.setChecked(getattr(status, "gear_four", False))
+        if self.current_protocol == PROTOCOL_SXSY:
+            self.gear_four_cb.setChecked(
+                getattr(status, "sxsy_three_speed", False)
+            )
+        else:
+            self.gear_four_cb.setChecked(getattr(status, "gear_four", False))
         if self.current_protocol == PROTOCOL_TAILING_Y34F:
             self.motor_running_cb.setChecked(getattr(status, "tailing_tcs_indicator", False))
         else:
@@ -3139,10 +3227,13 @@ class MainWindow(QMainWindow):
                 PROTOCOL_HANGZHOU_ANXIAN,
                 PROTOCOL_FZ_SIF,
                 PROTOCOL_JINGXIAN,
+                PROTOCOL_SXSY,
             }:
                 self.soc_spin.setValue(getattr(status, "voltage_percentage", 0))
             else:
                 self.soc_spin.setValue(getattr(status, "soc_percent", 0))
+        if getattr(self, "sxsy_soc_spin", None) is not None:
+            self.sxsy_soc_spin.setValue(getattr(status, "soc_percent", 0))
 
         if getattr(self, "lithium_soc_mode_cb", None) is not None:
             self.lithium_soc_mode_cb.setChecked(getattr(status, "lithium_soc_mode", True))
@@ -3390,6 +3481,9 @@ class MainWindow(QMainWindow):
         elif self.current_protocol == PROTOCOL_HANGZHOU_ANXIAN:
             status.protocol_speed_limit = self.speed_alarm_cb.isChecked()
             status.p_gear_protect = self.p_gear_protect_cb.isChecked()
+        elif self.current_protocol == PROTOCOL_SXSY:
+            state_code = self.sxsy_p_gear_group.checkedId()
+            status.sxsy_p_gear_state = state_code if state_code >= 0 else 0x00
         elif self.current_protocol == PROTOCOL_FZ_SIF:
             status.side_stand = self.distance_mode_cb.isChecked()
             status.protocol_speed_limit = self.speed_alarm_cb.isChecked()
@@ -3434,7 +3528,10 @@ class MainWindow(QMainWindow):
             status.motor_phase_loss = self.motor_phase_loss_cb.isChecked()
         
         # Status3
-        status.gear_four = self.gear_four_cb.isChecked()
+        if self.current_protocol == PROTOCOL_SXSY:
+            status.sxsy_three_speed = self.gear_four_cb.isChecked()
+        else:
+            status.gear_four = self.gear_four_cb.isChecked()
         if self.current_protocol == PROTOCOL_TAILING_Y34F:
             status.tailing_tcs_indicator = self.motor_running_cb.isChecked()
         else:
@@ -3506,10 +3603,13 @@ class MainWindow(QMainWindow):
                 PROTOCOL_HANGZHOU_ANXIAN,
                 PROTOCOL_FZ_SIF,
                 PROTOCOL_JINGXIAN,
+                PROTOCOL_SXSY,
             }:
                 status.voltage_percentage = self.soc_spin.value()
             else:
                 status.soc_percent = self.soc_spin.value()
+        if getattr(self, "sxsy_soc_spin", None) is not None:
+            status.soc_percent = self.sxsy_soc_spin.value()
         if getattr(self, "lithium_soc_mode_cb", None) is not None:
             status.lithium_soc_mode = self.lithium_soc_mode_cb.isChecked()
         if getattr(self, "soc_fault_cb", None) is not None:

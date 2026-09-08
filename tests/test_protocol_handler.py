@@ -1,4 +1,4 @@
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, fields
 import unittest
 
 from protocol.definitions import (
@@ -24,6 +24,7 @@ from protocol.protocol_handler import (
     PROTOCOL_TAILING_Y34B,
     PROTOCOL_TAILING_Y34F,
     PROTOCOL_SHENZHOUXING,
+    PROTOCOL_SXSY,
     PROTOCOL_WUXI_YIGE,
     PROTOCOL_XINCHI,
     PROTOCOL_XINRI,
@@ -44,6 +45,20 @@ class ProtocolHandlerTests(unittest.TestCase):
     def test_protocol_models_remain_available_from_legacy_module(self):
         self.assertIs(ProtocolConfig, ModelProtocolConfig)
         self.assertIs(StatusBits, ModelStatusBits)
+
+    def test_sxsy_fields_do_not_reorder_legacy_status_model(self):
+        field_names = [field.name for field in fields(StatusBits)]
+        percentage_index = field_names.index("current_percentage")
+
+        self.assertEqual(field_names[percentage_index + 1], "voltage_24v")
+        self.assertEqual(
+            field_names[-3:],
+            [
+                "lithium_bms_min_cell_voltage_v",
+                "sxsy_p_gear_state",
+                "sxsy_three_speed",
+            ],
+        )
 
     def test_protocol_registry_is_immutable_and_drives_public_metadata(self):
         self.assertIsInstance(SUPPORTED_PROTOCOLS, list)
@@ -167,6 +182,269 @@ class ProtocolHandlerTests(unittest.TestCase):
         self.assertEqual(first_preview, second_preview)
         self.assertEqual(send_result, first_preview)
         self.assertEqual(self.handler.get_current_hangzhou_sequence(), 2)
+
+    def test_sxsy_examples_match_specification(self):
+        self.assertEqual(
+            [self.handler.sxsy_pluscode_encrypt(value) for value in range(1, 5)],
+            [0x64, 0x61, 0x7A, 0x67],
+        )
+        for sequence, expected in (
+            (0x000, 0x7B),
+            (0x0ED, 0x28),
+            (0x158, 0x6A),
+            (0xFFF, 0x17),
+        ):
+            with self.subTest(sequence=sequence):
+                self.assertEqual(
+                    self.handler.sxsy_pluscode_encrypt(sequence),
+                    expected,
+                )
+        expected_frames = [
+            [
+                0x30, 0x01, 0x00, 0xA4, 0x64, 0x64,
+                0x00, 0x64, 0x64, 0x64, 0x64, 0x95,
+            ],
+            [
+                0x30, 0x02, 0x00, 0x71, 0x61, 0x61,
+                0x00, 0x61, 0x61, 0x61, 0x61, 0x43,
+            ],
+            [
+                0x30, 0x03, 0x00, 0x7A, 0x7C, 0x7A,
+                0x00, 0x7A, 0x7A, 0x7A, 0x7A, 0x4F,
+            ],
+            [
+                0x30, 0x04, 0x00, 0x6B, 0x67, 0x67,
+                0x00, 0x68, 0xF7, 0x67, 0x67, 0xC0,
+            ],
+        ]
+        statuses = [
+            StatusBits(protocol_name=PROTOCOL_SXSY, soc_percent=0, hall_fault=True),
+            StatusBits(
+                protocol_name=PROTOCOL_SXSY,
+                soc_percent=0,
+                controller_fault=True,
+            ),
+            StatusBits(protocol_name=PROTOCOL_SXSY, soc_percent=0, speed_mode=2),
+            StatusBits(
+                protocol_name=PROTOCOL_SXSY,
+                soc_percent=0,
+                cruise=True,
+                hall_count=400,
+            ),
+        ]
+
+        for status, expected in zip(statuses, expected_frames):
+            success, frame, error = self.handler.generate_frame(status)
+
+            self.assertTrue(success, error)
+            self.assertEqual(frame, expected)
+            checksum = 0
+            for value in frame[:11]:
+                checksum ^= value
+            self.assertEqual(frame[11], checksum)
+
+        self.assertEqual(self.handler.get_current_sxsy_sequence(), 5)
+
+    def test_sxsy_preview_does_not_increment_and_sequence_wraps(self):
+        status = StatusBits(protocol_name=PROTOCOL_SXSY, soc_percent=0)
+        self.handler.reset_sxsy_sequence(0x0FFF)
+
+        first_preview = self.handler.generate_frame_for_preview(status)
+        second_preview = self.handler.generate_frame_for_preview(status)
+        send_result = self.handler.generate_frame(status)
+
+        self.assertEqual(first_preview, second_preview)
+        self.assertEqual(send_result, first_preview)
+        preview_frame = first_preview[1]
+        self.assertEqual(preview_frame[1], 0xFF)
+        self.assertEqual(preview_frame[2] >> 4, 0x0F)
+        self.assertEqual(self.handler.get_current_sxsy_sequence(), 0)
+
+        success, wrapped_frame, error = self.handler.generate_frame(status)
+        self.assertTrue(success, error)
+        self.assertEqual(wrapped_frame[1], 0x00)
+        self.assertEqual(wrapped_frame[2] >> 4, 0x00)
+        self.assertEqual(self.handler.get_current_sxsy_sequence(), 1)
+
+    def test_sxsy_p_gear_and_sign_magnitude_current(self):
+        for state_code in (0x00, 0x0D, 0x0E, 0x0F):
+            with self.subTest(state_code=state_code):
+                status = StatusBits(
+                    protocol_name=PROTOCOL_SXSY,
+                    sxsy_p_gear_state=state_code,
+                    current_a=-5,
+                )
+
+                success, frame, error = self.handler.generate_frame_for_preview(status)
+
+                self.assertTrue(success, error)
+                self.assertEqual(frame[2] & 0x0F, state_code)
+                self.assertEqual(frame[6], 0x85)
+
+        for current_a, expected_raw in ((-127, 0xFF), (0, 0x00), (127, 0x7F)):
+            with self.subTest(current_a=current_a):
+                status = StatusBits(
+                    protocol_name=PROTOCOL_SXSY,
+                    current_a=current_a,
+                )
+                success, frame, error = self.handler.generate_frame_for_preview(
+                    status
+                )
+                self.assertTrue(success, error)
+                self.assertEqual(frame[6], expected_raw)
+
+        invalid_state = StatusBits(
+            protocol_name=PROTOCOL_SXSY,
+            sxsy_p_gear_state=0x01,
+        )
+        success, frame, error = self.handler.generate_frame(invalid_state)
+        self.assertFalse(success)
+        self.assertEqual(frame, [])
+        self.assertIn("SXSY P档状态", error)
+        self.assertEqual(self.handler.get_current_sxsy_sequence(), 1)
+
+        invalid_current = StatusBits(
+            protocol_name=PROTOCOL_SXSY,
+            current_a=-128,
+        )
+        success, frame, error = self.handler.generate_frame(invalid_current)
+        self.assertFalse(success)
+        self.assertEqual(frame, [])
+        self.assertIn("SXSY 运行电流", error)
+        self.assertEqual(self.handler.get_current_sxsy_sequence(), 1)
+
+    def test_sxsy_byte_descriptions_and_presets_are_protocol_specific(self):
+        descriptions = self.handler.get_byte_descriptions(PROTOCOL_SXSY)
+
+        self.assertEqual(len(descriptions), 12)
+        self.assertIn("0x30", descriptions[0])
+        self.assertIn("电压比例", descriptions[9])
+        self.assertIn("SOC", descriptions[10])
+        self.assertNotEqual(
+            descriptions,
+            self.handler.get_byte_descriptions(PROTOCOL_RUILUN),
+        )
+
+        for preset_factory in (
+            PresetScenarios.sxsy_normal_running,
+            PresetScenarios.sxsy_energy_recovery,
+            PresetScenarios.sxsy_fault_scenario,
+        ):
+            with self.subTest(preset=preset_factory.__name__):
+                status = preset_factory()
+                self.assertEqual(status.protocol_name, PROTOCOL_SXSY)
+                success, frame, error = self.handler.generate_frame_for_preview(
+                    status
+                )
+                self.assertTrue(success, error)
+                self.assertEqual(len(frame), 12)
+
+    def test_sxsy_percentage_fields_reject_out_of_range_values(self):
+        for field_name, value, error_text in (
+            ("voltage_percentage", -1, "电压百分比"),
+            ("voltage_percentage", 101, "电压百分比"),
+            ("soc_percent", -1, "百分比输入"),
+            ("soc_percent", 101, "百分比输入"),
+        ):
+            with self.subTest(field_name=field_name, value=value):
+                status = StatusBits(protocol_name=PROTOCOL_SXSY)
+                setattr(status, field_name, value)
+
+                success, frame, error = self.handler.generate_frame(status)
+
+                self.assertFalse(success)
+                self.assertEqual(frame, [])
+                self.assertIn(error_text, error)
+                self.assertEqual(self.handler.get_current_sxsy_sequence(), 1)
+
+    def test_sxsy_malformed_integer_fields_do_not_consume_sequence(self):
+        for field_name in (
+            "speed_mode",
+            "hall_count",
+            "voltage_percentage",
+            "soc_percent",
+        ):
+            with self.subTest(field_name=field_name):
+                status = StatusBits(protocol_name=PROTOCOL_SXSY)
+                setattr(status, field_name, 1.5)
+
+                success, frame, error = self.handler.generate_frame(status)
+
+                self.assertFalse(success)
+                self.assertEqual(frame, [])
+                self.assertIn("必须是整数", error)
+                self.assertEqual(self.handler.get_current_sxsy_sequence(), 1)
+
+    def test_sxsy_status_bits_match_documented_positions(self):
+        status2_fields = (
+            ("hall_fault", 0x40),
+            ("throttle_fault", 0x20),
+            ("controller_fault", 0x10),
+            ("under_voltage", 0x08),
+            ("cruise", 0x04),
+            ("assist", 0x02),
+            ("motor_phase_loss", 0x01),
+        )
+        status3_fields = (
+            ("sxsy_three_speed", 0x80),
+            ("motor_running", 0x40),
+            ("brake", 0x20),
+            ("controller_protect", 0x10),
+            ("regen_charging", 0x08),
+            ("anti_runaway", 0x04),
+        )
+        status4_fields = (
+            ("one_key_enable", 0x40),
+            ("ekk_enable", 0x20),
+            ("over_current", 0x10),
+            ("stall_protect", 0x08),
+            ("reverse", 0x04),
+            ("electronic_brake", 0x02),
+            ("speed_limit", 0x01),
+        )
+        plus_code = self.handler.sxsy_pluscode_encrypt(1)
+
+        for byte_index, field_mappings in (
+            (3, status2_fields),
+            (4, status3_fields),
+            (5, status4_fields),
+        ):
+            for field_name, expected_bit in field_mappings:
+                with self.subTest(byte_index=byte_index, field_name=field_name):
+                    status = StatusBits(protocol_name=PROTOCOL_SXSY)
+                    setattr(status, field_name, True)
+                    success, frame, error = self.handler.generate_frame_for_preview(
+                        status
+                    )
+                    self.assertTrue(success, error)
+                    self.assertEqual(
+                        (frame[byte_index] - plus_code) & 0xFF,
+                        expected_bit,
+                    )
+
+        for speed_mode in range(4):
+            with self.subTest(speed_mode=speed_mode):
+                status = StatusBits(
+                    protocol_name=PROTOCOL_SXSY,
+                    speed_mode=speed_mode,
+                )
+                success, frame, error = self.handler.generate_frame_for_preview(
+                    status
+                )
+                self.assertTrue(success, error)
+                self.assertEqual((frame[4] - plus_code) & 0x03, speed_mode)
+
+        reserved_status = StatusBits(
+            protocol_name=PROTOCOL_SXSY,
+            walk_mode=True,
+            current_70_flag=True,
+        )
+        success, frame, error = self.handler.generate_frame_for_preview(
+            reserved_status
+        )
+        self.assertTrue(success, error)
+        self.assertEqual((frame[3] - plus_code) & 0x80, 0)
+        self.assertEqual((frame[5] - plus_code) & 0x80, 0)
 
     def test_fz_sif_frame_matches_bl1832_y62_mapping(self):
         status = StatusBits(protocol_name=PROTOCOL_FZ_SIF)

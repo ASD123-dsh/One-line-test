@@ -94,21 +94,21 @@ class SerialManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.send_interval_ms, 1000)
         mock_start.assert_called_once_with(1000)
 
-    def test_uart_cyclic_send_accepts_50ms_and_rejects_49ms(self):
+    def test_uart_cyclic_send_accepts_10ms_and_rejects_9ms(self):
         frame_data = [0x01, 0x02]
 
-        success, error = self.manager.start_cyclic_send(frame_data, 49)
+        success, error = self.manager.start_cyclic_send(frame_data, 9)
 
         self.assertFalse(success)
-        self.assertEqual(error, "发送间隔必须在50ms-5000ms范围内")
+        self.assertEqual(error, "发送间隔必须在10ms-5000ms范围内")
 
         with patch.object(self.manager.send_timer, "start") as mock_start:
-            success, error = self.manager.start_cyclic_send(frame_data, 50)
+            success, error = self.manager.start_cyclic_send(frame_data, 10)
 
         self.assertTrue(success, error)
-        self.assertEqual(self.manager.send_interval_ms, 50)
+        self.assertEqual(self.manager.send_interval_ms, 10)
         self.assertEqual(self.manager.send_timer.timerType(), Qt.PreciseTimer)
-        mock_start.assert_called_once_with(50)
+        mock_start.assert_called_once_with(10)
 
     def test_start_cyclic_send_sequence_accepts_multiple_frames(self):
         frame_sequence = [
@@ -255,28 +255,33 @@ class SerialManagerTests(unittest.TestCase):
 
         self.assertEqual(skip_ui_values, [True] * 9 + [False])
 
-    def test_direct_battery_single_wire_mode_keeps_500_to_5000ms_interval_rules(self):
-        frame_data = [0x00, 0x50, 0x00, 0x00, 0x00, 0x50]
+    def test_direct_sif_modes_keep_500_to_5000ms_interval_rules(self):
+        for send_mode, frame_length in (
+            (SEND_MODE_BATTERY_SINGLE_WIRE, 6),
+            (SEND_MODE_LUYUAN_BMS_SIF, 15),
+            (SEND_MODE_JINGXIAN_SIF, 12),
+        ):
+            with self.subTest(send_mode=send_mode):
+                frame_data = [0x00] * frame_length
+                success, error = self.manager.start_cyclic_send(
+                    frame_data,
+                    499,
+                    send_mode=send_mode,
+                )
 
-        success, error = self.manager.start_cyclic_send(
-            frame_data,
-            499,
-            send_mode=SEND_MODE_BATTERY_SINGLE_WIRE,
-        )
+                self.assertFalse(success)
+                self.assertEqual(error, "发送间隔必须在500ms-5000ms范围内")
 
-        self.assertFalse(success)
-        self.assertEqual(error, "发送间隔必须在500ms-5000ms范围内")
+                with patch.object(self.manager.send_timer, "start") as mock_start:
+                    success, error = self.manager.start_cyclic_send(
+                        frame_data,
+                        500,
+                        send_mode=send_mode,
+                    )
 
-        with patch.object(self.manager.send_timer, "start") as mock_start:
-            success, error = self.manager.start_cyclic_send(
-                frame_data,
-                500,
-                send_mode=SEND_MODE_BATTERY_SINGLE_WIRE,
-            )
-
-        self.assertTrue(success, error)
-        self.assertEqual(self.manager.cyclic_send_mode, SEND_MODE_BATTERY_SINGLE_WIRE)
-        mock_start.assert_called_once_with(500)
+                self.assertTrue(success, error)
+                self.assertEqual(self.manager.cyclic_send_mode, send_mode)
+                mock_start.assert_called_once_with(500)
 
     def test_battery_single_wire_mode_uses_break_condition_pulses_and_releases_after_stop(self):
         frame_data = [0x00, 0x01, 0x00, 0x00, 0x00, 0x01]

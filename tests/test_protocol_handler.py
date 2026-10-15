@@ -109,7 +109,7 @@ class ProtocolHandlerTests(unittest.TestCase):
                 checksum_mode="xor",
                 send_mode="uart",
                 generator_method="_generate_test_frame",
-                min_send_interval_ms=49,
+                min_send_interval_ms=9,
                 max_send_interval_ms=5000,
                 default_send_interval_ms=500,
             )
@@ -944,17 +944,60 @@ class ProtocolHandlerTests(unittest.TestCase):
         self.assertEqual(frame, [3, 1, 212, 176, 80, 54, 28, 133, 18, 52, 157, 34])
 
     def test_battery_single_wire_frame_uses_six_bytes_and_sum_checksum(self):
+        """验证 0x00 数据头、测试默认字节、SOC 位置及累加校验和发送方式。"""
         status = StatusBits(protocol_name=PROTOCOL_BATTERY_SINGLE_WIRE)
         status.soc_percent = 88
 
         success, frame, error = self.handler.generate_frame_for_preview(status)
 
         self.assertTrue(success, error)
-        self.assertEqual(frame, [0, 88, 0, 0, 0, 88])
+        self.assertEqual(frame, [0, 88, 1, 1, 1, 91])
+        self.assertEqual(
+            self.handler.get_protocol_checksum_mode(PROTOCOL_BATTERY_SINGLE_WIRE),
+            "sum",
+        )
         self.assertEqual(
             self.handler.get_protocol_send_mode(PROTOCOL_BATTERY_SINGLE_WIRE),
             "uart",
         )
+
+    def test_battery_single_wire_sum_differs_from_xor_for_every_valid_soc(self):
+        """遍历所有合法 SOC，独立计算校验并验证发送帧与预览帧一致。"""
+        for soc in range(101):
+            with self.subTest(soc=soc):
+                status = StatusBits(
+                    protocol_name=PROTOCOL_BATTERY_SINGLE_WIRE,
+                    soc_percent=soc,
+                )
+                preview = self.handler.generate_frame_for_preview(status)
+                sent = self.handler.generate_frame(status)
+
+                self.assertEqual(sent, preview)
+                success, frame, error = sent
+                self.assertTrue(success, error)
+                self.assertEqual(len(frame), 6)
+                self.assertEqual(frame[0], 0x00)
+                self.assertEqual(frame[1], soc)
+                expected_xor = 0
+                for value in frame[:5]:
+                    expected_xor ^= value
+                expected_sum = sum(frame[:5]) & 0xFF
+                self.assertEqual(frame[5], expected_sum)
+                self.assertNotEqual(frame[5], expected_xor)
+
+    def test_battery_single_wire_presets_use_nonzero_test_defaults(self):
+        """验证三个预设场景统一使用测试默认字节且保留原 SOC。"""
+        for preset, expected_soc in (
+            (PresetScenarios.battery_single_wire_normal_running, 80),
+            (PresetScenarios.battery_single_wire_energy_recovery, 62),
+            (PresetScenarios.battery_single_wire_fault_scenario, 15),
+        ):
+            with self.subTest(preset=preset.__name__):
+                success, frame, error = self.handler.generate_frame(preset())
+                self.assertTrue(success, error)
+                self.assertEqual(
+                    frame, [0, expected_soc, 1, 1, 1, expected_soc + 3]
+                )
 
     def test_soc_fault_only_bypasses_range_for_protocols_that_encode_it(self):
         fault_protocols = {

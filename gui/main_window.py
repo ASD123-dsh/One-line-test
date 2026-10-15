@@ -1277,8 +1277,9 @@ class MainWindow(QMainWindow):
             DEFAULT_PROTOCOL_DEFINITION.default_send_interval_ms
         )
         self.interval_spin.setToolTip(
-            "默认 500ms；低于 500ms 时请确认串口吞吐量及转码平台处理能力，"
-            "过快可能造成覆盖或丢帧。"
+            "最低可选 10ms，默认 500ms；10ms 仅表示软件允许设置，"
+            "低于 500ms 时请确认波特率、帧长及转码平台处理能力，"
+            "过快可能造成覆盖、丢帧或实际周期变长。"
         )
         self.interval_spin.valueChanged.connect(self.on_interval_changed)
         layout.addWidget(self.interval_spin, 0, 1)

@@ -947,16 +947,21 @@ class ProtocolHandler:
     def _generate_battery_single_wire_frame(
         self, status: StatusBits
     ) -> Tuple[bool, List[int], str]:
+        """生成电池单线测试帧，保持 0x00 数据头并区分累加和与异或校验。"""
+
         is_valid, error_msg = self.validate_status_bits(status)
         if not is_valid:
             return False, [], error_msg
 
         frame = [0] * 6
+        # 数据头保持规格书要求的 0x00，避免非零头影响设备识别。
         frame[0] = 0x00
         frame[1] = status.soc_percent & 0xFF
-        frame[2] = 0x00
-        frame[3] = 0x00
-        frame[4] = 0x00
+        # 仅 BYTE3-5 默认填 0x01，解决其他数据全零时 SUM 与 XOR 相同的问题。
+        # SOC 为 0-100 时，SUM = SOC + 3，XOR = SOC ^ 1，两者始终不同。
+        frame[2] = 0x01
+        frame[3] = 0x01
+        frame[4] = 0x01
         frame[5] = self._sum_checksum(frame[:5])
         return True, frame, ""
 
@@ -1803,11 +1808,11 @@ class ProtocolHandler:
                 "校验和 (XOR)",
             ],
             PROTOCOL_BATTERY_SINGLE_WIRE: [
-                "BYTE1 固定 0x00",
+                "BYTE1 数据头 (固定 0x00)",
                 "BYTE2 电池剩余容量 SOC",
-                "BYTE3 固定 0x00",
-                "BYTE4 固定 0x00",
-                "BYTE5 固定 0x00",
+                "BYTE3 测试默认 0x01 (规格书 0x00)",
+                "BYTE4 测试默认 0x01 (规格书 0x00)",
+                "BYTE5 测试默认 0x01 (规格书 0x00)",
                 "BYTE6 8 位累加校验和",
             ],
         }

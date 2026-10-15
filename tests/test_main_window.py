@@ -39,12 +39,12 @@ class MainWindowIntervalTests(unittest.TestCase):
         self.window.serial_manager.is_cyclic_sending = Mock(return_value=True)
         self.window.serial_manager.update_cyclic_send_interval = Mock(return_value=(True, ""))
 
-        self.window.interval_spin.setValue(50)
+        self.window.interval_spin.setValue(10)
 
-        self.window.serial_manager.update_cyclic_send_interval.assert_called_once_with(50)
+        self.window.serial_manager.update_cyclic_send_interval.assert_called_once_with(10)
 
-    def test_interval_spin_keeps_500_default_and_allows_50ms(self):
-        self.assertEqual(self.window.interval_spin.minimum(), 50)
+    def test_interval_spin_keeps_500_default_and_allows_10ms(self):
+        self.assertEqual(self.window.interval_spin.minimum(), 10)
         self.assertEqual(self.window.interval_spin.maximum(), 5000)
         self.assertEqual(self.window.interval_spin.value(), 500)
 
@@ -56,7 +56,7 @@ class MainWindowIntervalTests(unittest.TestCase):
         self.window.current_protocol = PROTOCOL_XINCHI
         self.window.apply_send_interval_constraints()
 
-        self.assertEqual(self.window.interval_spin.minimum(), 50)
+        self.assertEqual(self.window.interval_spin.minimum(), 10)
         self.assertEqual(self.window.interval_spin.maximum(), 5000)
         self.assertEqual(self.window.interval_spin.value(), 500)
 
@@ -310,6 +310,49 @@ class MainWindowProtocolSwitchTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "规格字段无效"):
             self.window._make_default_custom_frame()
+
+    def test_battery_single_wire_generated_paths_use_nonzero_test_defaults(self):
+        """验证数据自定义预览、发送及全自定义和包组初始帧使用同一测试数据。"""
+        self.window.on_protocol_changed(PROTOCOL_BATTERY_SINGLE_WIRE)
+        self.window.custom_radio.click()
+        self.window.battery_single_wire_soc_spin.setValue(80)
+        self.window.update_current_frame_display()
+        expected_frame = [0, 80, 1, 1, 1, 83]
+
+        self.assertIn(
+            "00 50 01 01 01 53", self.window.current_frame_text.toPlainText()
+        )
+        self.assertEqual(self.window._make_default_custom_frame(), expected_frame)
+        self.assertEqual(self.window._get_packet_sequence_frames(), [expected_frame])
+        self.window.serial_manager.send_single_frame = Mock(return_value=(True, ""))
+        self.window.send_single_frame()
+        self.window.serial_manager.send_single_frame.assert_called_once_with(
+            expected_frame, send_mode="uart"
+        )
+        self.window.frame_custom_radio.click()
+        self.assertEqual(self.window.custom_frame_data, expected_frame)
+
+    def test_battery_single_wire_preserves_explicit_custom_frames(self):
+        """验证手动自定义帧和已有包组不会被新的默认字节覆盖。"""
+        self.window.on_protocol_changed(PROTOCOL_BATTERY_SINGLE_WIRE)
+        self.window.frame_custom_radio.click()
+        original_frame = [0, 80, 0, 0, 0, 80]
+        self.window.on_custom_frame_changed(original_frame)
+        self.window.packet_sequence_frames[PROTOCOL_BATTERY_SINGLE_WIRE] = [
+            original_frame.copy()
+        ]
+        self.window.serial_manager.send_single_frame = Mock(return_value=(True, ""))
+
+        self.window.send_single_frame()
+
+        self.window.serial_manager.send_single_frame.assert_called_once_with(
+            original_frame, send_mode="uart"
+        )
+        self.assertEqual(self.window.custom_frame_data, original_frame)
+        self.assertIn(
+            "00 50 00 00 00 50", self.window.current_frame_text.toPlainText()
+        )
+        self.assertEqual(self.window._get_packet_sequence_frames(), [original_frame])
 
     def test_send_error_remains_visible_after_disconnect_stopped_timer(self):
         self.window.active_send_mode = "single"

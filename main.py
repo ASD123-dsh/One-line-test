@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-瑞轮仪表一线通协议测试软件 V1.56
+AD 仪表一线通协议测试软件
 主程序入口文件
 
 基于协议文档：瑞轮仪表一线通协议_协议电压_铅酸锂电SOC_能量回收滑行充电_TCS V1.56_20240522.pdf
@@ -15,6 +15,7 @@ from PyQt5.QtWidgets import QApplication
 from PyQt5.QtGui import QIcon, QFont
 
 from app_paths import resource_path
+from app_info import APP_VERSION
 from gui.activation_dialog import ActivationDialog
 from gui.main_window import MainWindow
 from licensing.activation import ActivationService
@@ -37,7 +38,7 @@ def main() -> None:
     
     # 设置应用程序属性
     app.setApplicationName("瑞轮仪表一线通协议测试软件")
-    app.setApplicationVersion("1.56")
+    app.setApplicationVersion(APP_VERSION)
     app.setOrganizationName("瑞轮仪表")
     
     # 设置全局字体

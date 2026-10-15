@@ -1,6 +1,6 @@
 import os
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -109,6 +109,120 @@ class SerialManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.send_interval_ms, 10)
         self.assertEqual(self.manager.send_timer.timerType(), Qt.PreciseTimer)
         mock_start.assert_called_once_with(10)
+
+    def test_cyclic_frame_provider_reads_latest_data_without_restarting_timer(self):
+        """验证每个周期读取最新帧，修改数据不重启定时器且不共享帧列表。"""
+        current_frame = [0x01, 0x02]
+        provider = Mock(side_effect=lambda: current_frame)
+        with patch.object(self.manager.send_timer, "start") as mock_start:
+            success, error = self.manager.start_cyclic_send(
+                current_frame, 10, frame_provider=provider
+            )
+            self.assertTrue(success, error)
+            provider.assert_not_called()
+            self.manager._send_cyclic_data()
+            self.assertEqual(self.manager.serial_port.last_payload, b"\x01\x02")
+
+            current_frame[:] = [0x03, 0x04]
+            self.manager._send_cyclic_data()
+
+        self.assertEqual(self.manager.serial_port.last_payload, b"\x03\x04")
+        self.assertEqual(self.manager.cyclic_data, [0x03, 0x04])
+        self.assertIsNot(self.manager.cyclic_data, current_frame)
+        self.assertEqual(provider.call_count, 2)
+        mock_start.assert_called_once_with(10)
+
+    def test_cyclic_frame_provider_rejects_invalid_frames_without_sending(self):
+        """验证动态帧的字节和长度校验，失败后不再发送旧帧或重复报错。"""
+        errors = []
+        self.manager.send_error.connect(errors.append)
+        for invalid_frame in (None, [], [1], [1, 256], [True, 2], [1, "2"]):
+            with self.subTest(frame=invalid_frame):
+                errors.clear()
+                self.manager.serial_port.last_payload = None
+                provider = Mock(return_value=invalid_frame)
+                with patch.object(self.manager.send_timer, "start"):
+                    success, error = self.manager.start_cyclic_send(
+                        [1, 2], frame_provider=provider
+                    )
+                self.assertTrue(success, error)
+
+                self.manager._send_cyclic_data()
+                self.manager._send_cyclic_data()
+
+                self.assertIsNone(self.manager.serial_port.last_payload)
+                self.assertFalse(self.manager.is_cyclic_sending())
+                self.assertIsNone(self.manager.cyclic_frame_provider)
+                self.assertEqual(len(errors), 1)
+                self.assertIn("生成循环发送帧失败", errors[0])
+                provider.assert_called_once_with()
+
+    def test_cyclic_frame_provider_exception_stops_send_and_reports_once(self):
+        """验证帧生成回调的校验异常和意外异常都能安全停止循环。"""
+        errors = []
+        self.manager.send_error.connect(errors.append)
+        for exception in (ValueError("SOC 无效"), RuntimeError("读取状态失败")):
+            with self.subTest(exception=exception):
+                errors.clear()
+                provider = Mock(side_effect=exception)
+                with patch.object(self.manager.send_timer, "start"):
+                    success, error = self.manager.start_cyclic_send(
+                        [1, 2], frame_provider=provider
+                    )
+                self.assertTrue(success, error)
+
+                self.manager._send_cyclic_data()
+                self.manager._send_cyclic_data()
+
+                self.assertIsNone(self.manager.serial_port.last_payload)
+                self.assertEqual(len(errors), 1)
+                self.assertIn(str(exception), errors[0])
+                self.assertEqual(self.manager.cyclic_frame_sequence, [])
+                provider.assert_called_once_with()
+
+    def test_start_cyclic_send_rejects_non_callable_frame_provider(self):
+        """验证非法回调不能启动定时器。"""
+        with patch.object(self.manager.send_timer, "start") as mock_start:
+            success, error = self.manager.start_cyclic_send(
+                [1, 2], frame_provider=42
+            )
+        self.assertFalse(success)
+        self.assertIn("必须可调用", error)
+        mock_start.assert_not_called()
+
+    def test_stop_and_static_restarts_clear_cyclic_frame_provider(self):
+        """验证停发、固定单帧和包组启动均清除之前的动态回调。"""
+        provider = Mock(return_value=[9, 9])
+        with patch.object(self.manager.send_timer, "start"):
+            success, error = self.manager.start_cyclic_send(
+                [0, 0], frame_provider=provider
+            )
+            self.assertTrue(success, error)
+            self.manager.stop_cyclic_send()
+            self.assertIsNone(self.manager.cyclic_frame_provider)
+            self.manager._send_cyclic_data()
+            provider.assert_not_called()
+
+            self.manager.start_cyclic_send([0, 0], frame_provider=provider)
+            success, error = self.manager.start_cyclic_send([1, 2])
+            self.assertTrue(success, error)
+            self.assertIsNone(self.manager.cyclic_frame_provider)
+            self.manager._send_cyclic_data()
+            self.assertEqual(self.manager.serial_port.last_payload, b"\x01\x02")
+
+            self.manager.start_cyclic_send([0, 0], frame_provider=provider)
+            success, error = self.manager.start_cyclic_send_sequence(
+                [[3, 4], [5, 6]]
+            )
+            self.assertTrue(success, error)
+            self.assertIsNone(self.manager.cyclic_frame_provider)
+            payloads = []
+            for _ in range(3):
+                self.manager._send_cyclic_data()
+                payloads.append(self.manager.serial_port.last_payload)
+
+        self.assertEqual(payloads, [b"\x03\x04", b"\x05\x06", b"\x03\x04"])
+        provider.assert_not_called()
 
     def test_start_cyclic_send_sequence_accepts_multiple_frames(self):
         frame_sequence = [

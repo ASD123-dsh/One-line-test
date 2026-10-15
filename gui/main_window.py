@@ -14,7 +14,7 @@ from PyQt5.QtWidgets import (
     QGroupBox, QLabel, QComboBox, QPushButton, QSpinBox, QDoubleSpinBox,
     QCheckBox, QRadioButton, QButtonGroup, QTextEdit, QLineEdit,
     QMessageBox, QSplitter, QFrame, QScrollArea, QTabWidget,
-    QStatusBar, QDialog, QToolButton
+    QStatusBar, QDialog, QToolButton, QMenu, QApplication
 )
 from PyQt5.QtCore import Qt, QTimer, pyqtSlot
 from PyQt5.QtGui import QFont
@@ -50,6 +50,8 @@ from serial_comm.serial_manager import SerialManager, SerialPortDetector
 from gui.frame_config_dialog import FrameConfigDialog
 from gui.packet_sequence_dialog import PacketSequenceDialog
 from licensing.activation import ActivationService
+from app_info import APP_NAME, APP_VERSION, PROTOCOL_VERSION
+from gui.update_dialog import UpdateDialog
 
 MAX_HISTORY_BLOCKS = 10000
 
@@ -91,7 +93,7 @@ class MainWindow(QMainWindow):
     
     def init_ui(self):
         """初始化用户界面"""
-        self.setWindowTitle("AD仪表一线通协议测试工具 V1.56")
+        self.setWindowTitle(f"{APP_NAME} V{APP_VERSION}")
         self.setGeometry(100, 100, 1200, 800)
         
         # 创建中央部件
@@ -190,10 +192,14 @@ class MainWindow(QMainWindow):
             QToolButton#feedbackButton:pressed {
                 background-color: #d8e5f5;
             }
+            QToolButton#feedbackButton::menu-indicator {
+                image: none;
+                width: 0px;
+            }
         """)
     
     def create_window_action_bar(self) -> QFrame:
-        """创建右上角反馈操作栏。"""
+        """创建右上角操作栏，问号菜单提供检测更新和原有扫码反馈入口。"""
         bar = QFrame()
         bar.setObjectName("windowActionBar")
         bar.setFixedHeight(34)
@@ -210,13 +216,31 @@ class MainWindow(QMainWindow):
         self.feedback_btn = QToolButton()
         self.feedback_btn.setObjectName("feedbackButton")
         self.feedback_btn.setText("?")
-        self.feedback_btn.setToolTip("扫码反馈")
+        self.feedback_btn.setToolTip("检测更新 / 扫码反馈")
         self.feedback_btn.setCursor(Qt.PointingHandCursor)
         self.feedback_btn.setFixedSize(42, 34)
-        self.feedback_btn.clicked.connect(self.show_feedback_dialog)
+        self.help_menu = QMenu(self.feedback_btn)
+        self.check_update_action = self.help_menu.addAction("检测更新")
+        self.check_update_action.triggered.connect(self.show_update_dialog)
+        self.feedback_action = self.help_menu.addAction("扫码反馈")
+        self.feedback_action.triggered.connect(self.show_feedback_dialog)
+        self.feedback_btn.setMenu(self.help_menu)
+        self.feedback_btn.setPopupMode(QToolButton.InstantPopup)
         layout.addWidget(self.feedback_btn)
 
         return bar
+
+    def show_update_dialog(self):
+        """用户点击菜单后检测更新，后台下载完成后再由用户确认升级。"""
+        dialog = UpdateDialog(self)
+        dialog.ready_to_restart.connect(self._exit_for_update)
+        dialog.exec_()
+
+    def _exit_for_update(self):
+        """更新器就绪后停止发送并关闭窗口，原关闭流程负责断开串口。"""
+        self.serial_manager.stop_cyclic_send()
+        self.close()
+        QApplication.instance().quit()
 
     def show_feedback_dialog(self):
         """显示作者联系二维码。"""
@@ -1369,7 +1393,7 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage("就绪")
         
         # 添加版本信息
-        version_label = QLabel("协议版本: V1.56")
+        version_label = QLabel(f"软件: V{APP_VERSION}  |  协议: V{PROTOCOL_VERSION}")
         self.status_bar.addPermanentWidget(version_label)
     
     def connect_signals(self):
@@ -3982,6 +4006,23 @@ class MainWindow(QMainWindow):
         if not success:
             QMessageBox.critical(self, "发送失败", error_msg)
     
+    def _get_current_cyclic_frame(self):
+        """在发送周期内读取当前场景和最新数据，生成一份实际发送帧。"""
+        if self.frame_custom_radio.isChecked():
+            if self.custom_frame_data is None:
+                raise ValueError("请先配置自定义帧数据")
+            return self.custom_frame_data.copy()
+
+        status = (
+            self.get_current_status_from_ui()
+            if self.custom_radio.isChecked()
+            else self.current_status
+        )
+        success, frame_data, error_msg = self.generate_protocol_frame(status)
+        if not success:
+            raise ValueError(error_msg or "生成当前协议帧失败")
+        return frame_data
+
     @pyqtSlot()
     def toggle_cyclic_send(self):
         """切换循环发送状态"""
@@ -4015,8 +4056,8 @@ class MainWindow(QMainWindow):
                 else:
                     status = self.current_status
                 
-                # 生成协议帧
-                success, frame_data, error_msg = self.generate_protocol_frame(status)
+                # 启动时只做预览校验，实际发送周期再生成帧，避免提前消耗流水号。
+                success, frame_data, error_msg = self.generate_protocol_frame_for_preview(status)
                 
                 if not success:
                     QMessageBox.critical(self, "数据错误", error_msg)
@@ -4035,6 +4076,7 @@ class MainWindow(QMainWindow):
                 send_mode=send_mode,
                 min_interval_ms=definition.min_send_interval_ms,
                 max_interval_ms=definition.max_send_interval_ms,
+                frame_provider=self._get_current_cyclic_frame,
             )
             
             if success:

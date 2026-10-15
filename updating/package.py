@@ -11,7 +11,10 @@ import tempfile
 import zipfile
 from pathlib import Path, PurePosixPath
 
-from app_info import APP_EXE_NAME, APP_ID, APP_NAME, MANIFEST_NAME, PACKAGE_PLATFORM, UPDATER_EXE_NAME
+from app_info import (
+    APP_EXE_NAME, APP_ID, APP_NAME, MANIFEST_NAME, PACKAGE_PLATFORM,
+    PRIVATE_CONTENTS_DIR, PRIVATE_MANIFEST_NAME, UPDATER_EXE_NAME,
+)
 from .releases import UpdateError, check_cancelled, normalized_version
 
 MAX_FILES = 5000
@@ -76,10 +79,29 @@ def file_sha256(path, cancelled=None):
     return digest.hexdigest()
 
 
+def manifest_path_for(root):
+    """优先使用本工具专属清单，旧版通用清单只用于迁移，不覆盖其他应用清单。"""
+    root = Path(root)
+    private = root / PRIVATE_MANIFEST_NAME
+    if private.exists() or private.is_symlink():
+        return private
+    return root / MANIFEST_NAME
+
+
+def managed_contents_directory(manifest):
+    """按清单格式区分专属运行库和旧版共享目录，不按目录中其他软件猜测归属。"""
+    layout = manifest.get("layout", "legacy")
+    if layout == "isolated":
+        return PRIVATE_CONTENTS_DIR
+    if layout == "legacy":
+        return "_internal"
+    raise UpdateError("更新清单的运行库布局无效")
+
+
 def read_manifest(root, expected_version=None):
     """读取受限大小的清单，并验证软件身份、平台、版本及所有文件路径。"""
     try:
-        manifest_path = Path(root) / MANIFEST_NAME
+        manifest_path = manifest_path_for(root)
         if is_reparse_point(manifest_path):
             raise UpdateError("更新清单不能是链接")
         with manifest_path.open("rb") as source:
@@ -102,17 +124,26 @@ def read_manifest(root, expected_version=None):
     files = manifest.get("files")
     if not isinstance(files, dict) or not files or len(files) > MAX_FILES:
         raise UpdateError("更新清单的文件列表无效")
+    contents = managed_contents_directory(manifest)
+    expected_manifest = PRIVATE_MANIFEST_NAME if contents == PRIVATE_CONTENTS_DIR else MANIFEST_NAME
+    if manifest_path.name != expected_manifest:
+        raise UpdateError("更新清单名称与运行库布局不匹配")
     normalized_names = set()
+    reserved_names = (MANIFEST_NAME.casefold(), PRIVATE_MANIFEST_NAME.casefold())
     for name, digest in files.items():
-        safe_relative_path(name)
-        if name.casefold() == MANIFEST_NAME.casefold() or name.casefold() in normalized_names:
+        relative = safe_relative_path(name)
+        normalized_name = name.casefold()
+        if normalized_name in reserved_names or normalized_name in normalized_names:
             raise UpdateError("更新清单包含重复或保留文件名")
-        normalized_names.add(name.casefold())
+        # 修复混放时归属不明确的问题：清单不能把同级任意应用纳入升级范围。
+        if name != APP_EXE_NAME and (len(relative.parts) < 2 or relative.parts[0] != contents):
+            raise UpdateError(f"更新清单包含非本工具管理的路径：{name}")
+        normalized_names.add(normalized_name)
         if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
             raise UpdateError("更新清单包含无效的文件摘要")
-    if APP_EXE_NAME not in files or f"_internal/{UPDATER_EXE_NAME}" not in files:
+    if APP_EXE_NAME not in files or f"{contents}/{UPDATER_EXE_NAME}" not in files:
         raise UpdateError("更新包缺少主程序或独立更新器")
-    if not any(name.startswith("_internal/python") and name.endswith(".dll") for name in files):
+    if not any(name.startswith(contents + "/python") and name.endswith(".dll") for name in files):
         raise UpdateError("更新包缺少 Python 运行库")
     return manifest
 
@@ -122,7 +153,7 @@ def validate_payload(root, expected_version=None, cancelled=None):
     root = Path(root)
     manifest = read_manifest(root, expected_version)
     actual = {path.relative_to(root).as_posix(): path for path in iter_regular_files(root)}
-    if set(actual) != set(manifest["files"]) | {MANIFEST_NAME}:
+    if set(actual) != set(manifest["files"]) | {manifest_path_for(root).name}:
         raise UpdateError("更新包文件集合与清单不一致")
     for name, digest in manifest["files"].items():
         if file_sha256(actual[name], cancelled) != digest:
@@ -216,17 +247,21 @@ def discard_staging_directory(root):
 def build_manifest(root, version):
     """为发布工具生成逐文件校验清单，不把授权信息或源码加入分发包。"""
     root = Path(root)
+    isolated = (root / PRIVATE_CONTENTS_DIR).is_dir()
+    manifest_name = PRIVATE_MANIFEST_NAME if isolated else MANIFEST_NAME
     files = {}
     for path in sorted(iter_regular_files(root)):
         name = path.relative_to(root).as_posix()
-        if name != MANIFEST_NAME:
+        if name != manifest_name:
             safe_relative_path(name)
             files[name] = file_sha256(path)
     manifest = {
         "schema": 1, "app_id": APP_ID, "version": normalized_version(version),
         "platform": PACKAGE_PLATFORM, "executable": APP_EXE_NAME, "files": files,
     }
-    (root / MANIFEST_NAME).write_text(
+    if isolated:
+        manifest["layout"] = "isolated"
+    (root / manifest_name).write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     validate_payload(root, version)

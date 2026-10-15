@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""独立更新器：先准备同盘候选目录，等待主进程退出后替换并保留旧版备份。"""
+"""独立更新器：按本工具文件清单安装和回滚，新版确认启动后清理自有备份。"""
 
 import ctypes
 import json
@@ -8,26 +8,28 @@ import os
 import re
 import shutil
 import subprocess
-import tempfile
 import time
 import traceback
-import uuid
-from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 
-from app_info import APP_EXE_NAME, APP_ID, APP_NAME, MANIFEST_NAME
+from app_info import APP_EXE_NAME, APP_ID, APP_NAME
 from .package import (
     file_sha256, is_reparse_point, read_manifest, validate_payload,
     validate_staging_directory,
 )
 from .releases import UpdateCancelled, UpdateError, parse_version
+from .startup import STARTUP_REQUEST_ENV, create_startup_request, startup_is_ready
+# 保留已有安装入口和事务类型的导入名称，调用方无需调整导入。
+from .file_transaction import (
+    InstallPlan, apply_files, cleanup_transaction, discard_prepared_installation,
+    mark_committed, prepare_installation, release_lock, rollback_files, verify_installed_files,
+)
 
 JOB_NAME = "update-job.json"
 HANDOFF_NAME = "handoff.json"
-RENAME_MAX_ATTEMPTS = 80
-RENAME_RETRY_DELAY_SECONDS = 0.25
-RETRYABLE_WINDOWS_ERRORS = frozenset((5, 32, 33))
+STARTUP_TIMEOUT_SECONDS = 60
+STARTUP_STABLE_SECONDS = 5
+STARTUP_POLL_SECONDS = 0.1
 
 
 def write_status(root, status, message="", **extra):
@@ -41,7 +43,7 @@ def write_status(root, status, message="", **extra):
 
 
 def load_install_job(job_path):
-    """验证任务身份、暂存位置、目标程序和版本，禁止任意目录替换。"""
+    """验证任务身份、暂存位置、目标程序和版本，不再要求混放目录名称固定。"""
     job_path = Path(job_path)
     if job_path.name != JOB_NAME or is_reparse_point(job_path):
         raise UpdateError("更新任务文件无效")
@@ -65,8 +67,8 @@ def load_install_job(job_path):
     if not target.is_dir() or is_reparse_point(target) or len(target.parts) < 2:
         raise UpdateError("更新目标不是普通程序目录")
     target = target.resolve()
-    if target.name != APP_NAME or target == Path.home().resolve():
-        raise UpdateError("请保留完整程序文件夹名称，并将程序放在独立目录中再升级")
+    if target == Path.home().resolve():
+        raise UpdateError("请勿直接在用户主目录执行升级")
     if target == staging or target in staging.parents or staging in target.parents:
         raise UpdateError("程序目录与更新暂存目录不能互相包含")
     old_manifest = read_manifest(target)
@@ -85,88 +87,46 @@ def load_install_job(job_path):
     return job
 
 
-def preserve_user_files(target, candidate, old_manifest):
-    """保留程序目录内的用户导出文件，不混入旧运行库或覆盖新版程序文件。"""
-    managed = {name.casefold() for name in old_manifest["files"]} | {MANIFEST_NAME.casefold()}
-    pending = [target]
-    while pending:
-        directory = pending.pop()
-        for source in directory.iterdir():
-            relative = source.relative_to(target)
-            if relative.parts[0].casefold() == "_internal":
-                continue
-            if is_reparse_point(source):
-                raise UpdateError(f"用户文件包含链接，请先移出程序目录：{relative}")
-            if source.is_dir():
-                pending.append(source)
-                continue
-            if relative.as_posix().casefold() in managed:
-                continue
-            destination = candidate / relative
-            if destination.exists():
-                # 同名新版文件优先；原用户文件仍完整保存在旧版备份中。
-                continue
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, destination)
-
-
-@dataclass
-class InstallPlan:
-    """只描述已验证并位于目标同一磁盘的安装事务。"""
-
-    target: Path
-    candidate: Path
-    backup: Path
-
-
-def prepare_installation(job):
-    """在主程序退出前完成复制和校验，权限不足或损坏时保持当前软件运行。"""
-    target = job["target"]
-    candidate = Path(tempfile.mkdtemp(prefix=".sifexe-install-", dir=str(target.parent)))
-    try:
-        shutil.copytree(job["payload"], candidate, dirs_exist_ok=True)
-        validate_payload(candidate, job["version"])
-        preserve_user_files(target, candidate, job["old_manifest"])
-    except Exception:
-        shutil.rmtree(candidate)
-        raise
-    backup = target.with_name(
-        target.name + ".backup-" + datetime.now().strftime("%Y%m%d-%H%M%S")
-        + "-" + uuid.uuid4().hex[:8]
-    )
-    return InstallPlan(target, candidate, backup)
-
-
-def launch_application(executable):
+def launch_application(executable, startup_request=None):
     """从完整安装目录启动 GUI 主程序，不继承更新器的工作目录。"""
     environment = os.environ.copy()
     # 新程序独立于即将退出的更新器，避免运行库依赖更新器的临时解压目录。
     environment["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+    environment.pop(STARTUP_REQUEST_ENV, None)
+    if startup_request is not None:
+        environment[STARTUP_REQUEST_ENV] = str(startup_request)
     return subprocess.Popen(
         [str(executable)], cwd=str(Path(executable).parent), env=environment
     )
 
 
-def _rename_directory(source, destination):
-    """对 Windows 临时访问拒绝和共享占用有限重试，不覆盖或删除冲突目录。"""
-    started = time.monotonic()
-    errors = []
-    for attempt in range(RENAME_MAX_ATTEMPTS):
-        try:
-            os.rename(source, destination)
+def wait_for_application_startup(process, request_path):
+    """等待新版界面确认并稳定运行，早退或一直未就绪均不能删除旧版备份。"""
+    deadline = time.monotonic() + STARTUP_TIMEOUT_SECONDS
+    ready_since = None
+    while True:
+        if process.poll() is not None:
+            raise UpdateError("新版程序在启动确认期间退出")
+        now = time.monotonic()
+        if ready_since is None and startup_is_ready(request_path, process.pid):
+            ready_since = now
+        if ready_since is not None and now - ready_since >= STARTUP_STABLE_SECONDS:
             return
-        except OSError as exc:
-            errors.append(getattr(exc, "winerror", None))
-            exc.rename_attempts = attempt + 1
-            exc.rename_errors = errors.copy()
-            exc.rename_elapsed_seconds = round(time.monotonic() - started, 3)
-            # 修复更新时目录被短暂占用就立即回滚的问题；其他错误直接保留原异常。
-            if (
-                getattr(exc, "winerror", None) not in RETRYABLE_WINDOWS_ERRORS
-                or attempt + 1 == RENAME_MAX_ATTEMPTS
-            ):
+        if ready_since is None and now >= deadline:
+            raise UpdateError("等待新版界面启动确认超时")
+        time.sleep(STARTUP_POLL_SECONDS)
+
+
+def _stop_unconfirmed_application(process):
+    """回滚前仅停止本更新器刚启动的未就绪进程，不操作其他用户实例。"""
+    if process.poll() is None:
+        try:
+            process.terminate()
+        except OSError:
+            # 修复检查存活后进程恰好退出的竞态，不能因此放弃可正常执行的回滚。
+            if process.poll() is None:
                 raise
-            time.sleep(RENAME_RETRY_DELAY_SECONDS)
+        process.wait(timeout=10)
 
 
 def _record_install_error(staging, stage, exception):
@@ -188,8 +148,8 @@ def _record_install_error(staging, stage, exception):
     )
 
 
-def apply_installation(plan, launcher=launch_application):
-    """通过目录改名完成替换；替换或启动失败时恢复旧版。"""
+def apply_installation(plan, launcher=launch_application, verifier=None):
+    """只替换本工具清单文件；替换或启动失败时只恢复本次事务涉及的文件。"""
     try:
         # Windows 上仍有其他实例映射主 EXE 时，可写打开会失败；只检查，不写入数据。
         with (plan.target / APP_EXE_NAME).open("r+b"):
@@ -199,27 +159,38 @@ def apply_installation(plan, launcher=launch_application):
             f"程序仍被占用或没有写权限，请关闭其他工具窗口后重试\n系统原因：{exc}"
         ) from exc
     try:
-        _rename_directory(plan.target, plan.backup)
-    except OSError as exc:
-        raise UpdateError(f"备份旧版本失败，原程序目录未替换\n系统原因：{exc}") from exc
-    try:
-        _rename_directory(plan.candidate, plan.target)
+        apply_files(plan)
     except Exception as exc:
         try:
-            _rename_directory(plan.backup, plan.target)
-        except OSError as restore_error:
+            rollback_files(plan)
+        except Exception as restore_error:
             raise UpdateError(
                 f"安装失败且恢复未完成，请从以下目录恢复：{plan.backup}\n"
                 f"安装原因：{exc}\n恢复原因：{restore_error}"
             ) from restore_error
-        raise UpdateError(f"安装失败，旧版本已恢复\n系统原因：{exc}") from exc
-    try:
-        launcher(plan.target / APP_EXE_NAME)
-    except Exception as exc:
         try:
-            _rename_directory(plan.target, plan.candidate)
-            _rename_directory(plan.backup, plan.target)
-        except OSError as restore_error:
+            launcher(plan.target / APP_EXE_NAME)
+        except OSError:
+            pass
+        raise UpdateError(f"安装失败，旧版本文件已恢复\n系统原因：{exc}") from exc
+    process = None
+    try:
+        process = launcher(plan.target / APP_EXE_NAME)
+        if verifier is not None:
+            verifier(process)
+    except Exception as exc:
+        if process is not None and verifier is not None:
+            try:
+                _stop_unconfirmed_application(process)
+            except Exception as stop_error:
+                plan.state = "rollback_failed"
+                raise UpdateError(
+                    f"新版未确认启动且无法停止，旧版备份已保留：{plan.backup}\n"
+                    f"启动原因：{exc}\n停止原因：{stop_error}"
+                ) from stop_error
+        try:
+            rollback_files(plan)
+        except Exception as restore_error:
             raise UpdateError(
                 f"新版启动失败，请从以下目录恢复：{plan.backup}\n"
                 f"启动原因：{exc}\n恢复原因：{restore_error}"
@@ -230,6 +201,43 @@ def apply_installation(plan, launcher=launch_application):
             pass
         raise UpdateError(f"新版未能启动，旧版本已恢复\n系统原因：{exc}") from exc
     return plan.backup
+
+
+def cleanup_successful_backup(plan, old_manifest):
+    """只清理已确认成功的本次文件事务，不检查、复制或删除其他应用和用户文件。"""
+    if plan.state != "committed" or plan.old_manifest != old_manifest:
+        raise UpdateError("事务尚未提交或备份身份不符，未自动清理")
+    cleanup_transaction(plan)
+
+
+def complete_installation(job, plan):
+    """成功后尽力清理备份；清理受阻只记录警告，不把已成功的升级误报为失败。"""
+    warnings = []
+    backup_removed = False
+    try:
+        mark_committed(plan)
+        cleanup_successful_backup(plan, job["old_manifest"])
+        backup_removed = True
+    except Exception as exc:
+        warnings.append(f"旧版备份清理未完成：{exc}")
+    try:
+        release_lock(plan)
+    except (OSError, UpdateError) as exc:
+        warnings.append(f"本次更新锁清理未完成：{exc}")
+    staging = job["staging"]
+    try:
+        (staging / "release.zip").unlink(missing_ok=True)
+        shutil.rmtree(staging / "unpacked", ignore_errors=True)
+    except OSError as exc:
+        warnings.append(f"下载暂存清理未完成：{exc}")
+    try:
+        write_status(
+            staging, "complete", "升级完成" if not warnings else "升级完成，部分文件清理未完成",
+            backup=str(plan.backup), backup_removed=backup_removed, cleanup_warning="\n".join(warnings),
+        )
+    except OSError:
+        # 新版已经确认启动，写日志失败不能再触发回滚或弹出升级失败提示。
+        pass
 
 
 class WindowsParentProcess:
@@ -297,20 +305,31 @@ def run_installer(job_path):
         staging = job["staging"]
         stage = "验证主程序进程"
         parent = WindowsParentProcess(job["parent_pid"], job["target"] / APP_EXE_NAME)
-        stage = "准备同盘候选目录"
+        stage = "准备本工具文件和同盘备份"
         plan = prepare_installation(job)
+        startup_request = create_startup_request(
+            staging, job["target"] / APP_EXE_NAME, job["version"]
+        )
         if (staging / "cancel.request").exists():
             raise UpdateCancelled("已取消安装准备")
         write_status(staging, "ready")
         stage = "等待主程序退出"
         parent.wait(lambda: (staging / "cancel.request").exists())
         parent_exited = True
-        stage = "替换目录并重启"
-        backup = apply_installation(plan)
-        write_status(staging, "complete", "升级完成", backup=str(backup))
-        # 更新器自身仍在运行，保留它及结果文件，只清理已使用的大体积下载和解压副本。
-        (staging / "release.zip").unlink(missing_ok=True)
-        shutil.rmtree(staging / "unpacked", ignore_errors=True)
+
+        def launch_for_update(executable):
+            """仅已替换完成的新版启动携带握手请求，回滚旧版不携带。"""
+            request = startup_request if plan.state == "applied" else None
+            return launch_application(executable, request)
+
+        def verify_new_application(process):
+            """把本次启动的进程和确认请求绑定，旧版回滚不进入此验证。"""
+            wait_for_application_startup(process, startup_request)
+            verify_installed_files(plan)
+
+        stage = "替换本工具文件并确认新版启动"
+        apply_installation(plan, launch_for_update, verify_new_application)
+        complete_installation(job, plan)
         return 0
     except Exception as exc:
         try:
@@ -326,5 +345,12 @@ def run_installer(job_path):
     finally:
         if parent is not None:
             parent.close()
-        if plan is not None and plan.candidate.exists():
-            shutil.rmtree(plan.candidate, ignore_errors=True)
+        if plan is not None:
+            try:
+                if plan.state == "prepared" and not plan.mutated:
+                    discard_prepared_installation(plan)
+                else:
+                    release_lock(plan)
+            except (OSError, UpdateError):
+                # 只释放本次事务资源；未知文件或恢复未完成时保留记录，禁止整目录删除。
+                pass

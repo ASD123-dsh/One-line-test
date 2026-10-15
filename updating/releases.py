@@ -45,9 +45,10 @@ def normalized_version(value):
     return ".".join(str(part) for part in parse_version(value))
 
 
-def asset_name_for_version(version):
-    """生成与发布工具一致的 Windows 完整包附件名。"""
-    return f"AD-OneLine-v{normalized_version(version)}-windows-x64.zip"
+def asset_name_for_version(version, managed=False):
+    """旧附件名保持兼容，新客户端优先选择专属运行库的逐文件更新包。"""
+    suffix = "-managed" if managed else ""
+    return f"AD-OneLine-v{normalized_version(version)}-windows-x64{suffix}.zip"
 
 
 def validate_https_url(url):
@@ -115,11 +116,15 @@ def parse_release(data, current_version=APP_VERSION):
     version = normalized_version(tag)
     if parse_version(version) <= parse_version(current_version):
         return None
-    asset_name = asset_name_for_version(version)
     assets = data.get("assets")
     if not isinstance(assets, list):
         raise UpdateError("新版本未提供更新附件")
+    asset_name = asset_name_for_version(version, managed=True)
     matches = [asset for asset in assets if isinstance(asset, dict) and asset.get("name") == asset_name]
+    if not matches:
+        # 保留旧 Release 的检测和下载能力；安装阶段仍要求安全的专属运行库包。
+        asset_name = asset_name_for_version(version)
+        matches = [asset for asset in assets if isinstance(asset, dict) and asset.get("name") == asset_name]
     if len(matches) != 1:
         raise UpdateError(f"新版本缺少唯一的完整更新包：{asset_name}")
     asset = matches[0]

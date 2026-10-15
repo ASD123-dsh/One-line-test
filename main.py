@@ -13,12 +13,14 @@ import traceback
 
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtGui import QIcon, QFont
+from PyQt5.QtCore import QTimer
 
 from app_paths import resource_path
 from app_info import APP_VERSION
 from gui.activation_dialog import ActivationDialog
 from gui.main_window import MainWindow
 from licensing.activation import ActivationService
+from updating.startup import notify_startup_ready
 
 
 def _write_exception_log(file_name: str) -> None:
@@ -51,6 +53,8 @@ def main() -> None:
     if not activation_service.is_activated():
         activation_dialog = ActivationDialog(activation_service)
         activation_dialog.setWindowIcon(app_icon)
+        # 修复升级成功判定过早的问题；授权界面也属于正常可用的启动结果。
+        QTimer.singleShot(0, notify_startup_ready)
         if activation_dialog.exec_() != ActivationDialog.Accepted:
             return
 
@@ -58,6 +62,8 @@ def main() -> None:
     main_window = MainWindow(activation_service=activation_service)
     main_window.setWindowIcon(app_icon)
     main_window.show()
+    # 进入 GUI 事件循环后才确认启动，不以创建进程成功替代界面就绪。
+    QTimer.singleShot(0, notify_startup_ready)
     
     # 运行应用程序
     try:

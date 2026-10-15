@@ -14,7 +14,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from app_info import APP_NAME, APP_VERSION, UPDATER_EXE_NAME  # noqa: E402
+from app_info import APP_NAME, APP_VERSION, PRIVATE_CONTENTS_DIR, UPDATER_EXE_NAME  # noqa: E402
 from updating.package import build_manifest, file_sha256, iter_regular_files  # noqa: E402
 from updating.releases import asset_name_for_version  # noqa: E402
 
@@ -23,9 +23,9 @@ def create_release_zip(program_dir, output_dir, version=APP_VERSION):
     """为完整候选程序建立清单并打包，附件名与客户端选择规则保持一致。"""
     program_dir = Path(program_dir)
     output_dir = Path(output_dir)
-    build_manifest(program_dir, version)
+    manifest = build_manifest(program_dir, version)
     output_dir.mkdir(parents=True, exist_ok=True)
-    zip_path = output_dir / asset_name_for_version(version)
+    zip_path = output_dir / asset_name_for_version(version, managed=manifest.get("layout") == "isolated")
     with zipfile.ZipFile(zip_path, "x", zipfile.ZIP_DEFLATED) as archive:
         for path in sorted(iter_regular_files(program_dir)):
             name = (Path(APP_NAME) / path.relative_to(program_dir)).as_posix()
@@ -43,8 +43,25 @@ def run_pyinstaller(arguments):
     )
 
 
+def build_main_program(temporary, helper, contents_directory, label):
+    """复用同一源码构建不同目录布局，旧客户端过渡包不改变原附件约定。"""
+    run_pyinstaller([
+        "--windowed", "--onedir", "--name", APP_NAME,
+        "--contents-directory", contents_directory,
+        "--paths", str(ROOT_DIR),
+        "--icon", str(ROOT_DIR / "img" / "图标.ico"),
+        "--add-data", str(ROOT_DIR / "img") + ";img",
+        "--add-binary", str(helper) + ";.",
+        "--distpath", str(temporary / label),
+        "--workpath", str(temporary / (label + "-work")),
+        "--specpath", str(temporary / ("spec-" + label)),
+        str(ROOT_DIR / "main.py"),
+    ])
+    return temporary / label / APP_NAME
+
+
 def build_release(output_dir):
-    """在隔离目录分别构建独立更新器和主程序，禁止覆盖已有发布目录。"""
+    """构建专属运行库主包和旧客户端过渡包，不覆盖已有发布目录或自动上传。"""
     output_dir = Path(output_dir).resolve()
     if output_dir.exists():
         raise ValueError(f"输出目录已经存在，请指定新目录：{output_dir}")
@@ -61,25 +78,18 @@ def build_release(output_dir):
             str(ROOT_DIR / "tools" / "update_installer.py"),
         ])
         helper = temporary / "helper" / UPDATER_EXE_NAME
-        run_pyinstaller([
-            "--windowed", "--onedir", "--name", APP_NAME,
-            "--paths", str(ROOT_DIR),
-            "--icon", str(ROOT_DIR / "img" / "图标.ico"),
-            "--add-data", str(ROOT_DIR / "img") + ";img",
-            "--add-binary", str(helper) + ";.",
-            "--distpath", str(temporary / "program"),
-            "--workpath", str(temporary / "program-work"),
-            "--specpath", str(temporary / "spec-main"),
-            str(ROOT_DIR / "main.py"),
-        ])
-        program_dir = temporary / "program" / APP_NAME
+        program_dir = build_main_program(temporary, helper, PRIVATE_CONTENTS_DIR, "program")
         build_manifest(program_dir, APP_VERSION)
         output_dir.mkdir(parents=True)
         shutil.copytree(program_dir, output_dir / APP_NAME)
         package = create_release_zip(output_dir / APP_NAME, output_dir)
+        legacy_program = build_main_program(temporary, helper, "_internal", "legacy-program")
+        # 避免留下第二份可运行程序：过渡包直接从独占临时目录打 ZIP，随后统一清理。
+        legacy_package = create_release_zip(legacy_program, output_dir)
         print(f"软件版本：v{APP_VERSION}")
         print(f"完整程序：{output_dir / APP_NAME}")
         print(f"Release 附件：{package}")
+        print(f"旧客户端过渡附件：{legacy_package}")
         print(f"SHA-256：{file_sha256(package)}")
         return package
     finally:

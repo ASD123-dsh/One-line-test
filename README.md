@@ -113,14 +113,23 @@ BYTE6 仍为前五字节的 8 位累加和。例如 SOC 为 `80%` 时生成
 
 ## 软件更新与发布
 
-软件版本集中维护在 `app_info.py`，当前为 `1.58.1`。用户点击右上角
+软件版本集中维护在 `app_info.py`，当前版本为 `1.58.2`。完整程序请从
+[GitHub Releases](https://github.com/ASD123-dsh/One-line-test/releases/tag/v1.58.2)
+下载，推荐带 `managed` 的 ZIP；不要用仓库中的历史二进制文件代替完整发行包。用户点击右上角
 `? → 检测更新` 后查询本仓库 GitHub Releases；发现新版会自动下载完整 ZIP，
 校验通过后再由用户确认“升级并重启”。“扫码反馈”继续打开原有页面。
 
 作者使用 `python tools/build_release.py` 生成带独立更新器的完整发布包，上传到
 同版本标签的 GitHub Release。之前没有更新功能的用户需要先手动安装一次新版本。
 详见[软件发布与手动升级说明](docs/releasing.md)。
-本次版本用途和验证范围见 [V1.58.1 发布说明](docs/releases/v1.58.1.md)。
+本次更新和旧客户端迁移要求见 [V1.58.2 发布说明](docs/releases/v1.58.2.md)。
+混放目录升级、本地打包和验收记录见
+[逐文件升级说明](docs/update-managed-files-20261015.md)。
+
+当前本地最新版固定使用 `dist/AD仪表一线通协议测试工具/`；本地升级测试统一在
+`dist/升级测试/`，旧发行包和备份在 `dist/历史归档/`。具体入口见
+[本地产物导航](dist/README.md)，整理及恢复记录见
+[目录清理记录](docs/workspace-cleanup-20261015.md)。
 
 ## 架构
 

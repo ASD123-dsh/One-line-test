@@ -6,7 +6,7 @@ import ctypes
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 import serial
 import serial.tools.list_ports
@@ -86,6 +86,7 @@ class SerialManager(QObject):
 
         self.cyclic_data: Optional[List[int]] = None
         self.cyclic_frame_sequence: List[List[int]] = []
+        self.cyclic_frame_provider: Optional[Callable[[], List[int]]] = None
         self.cyclic_frame_index = 0
         self.cyclic_send_mode = SEND_MODE_UART
         self.send_interval_ms = DEFAULT_SEND_INTERVAL_MS
@@ -438,14 +439,22 @@ class SerialManager(QObject):
         send_mode: str = SEND_MODE_UART,
         min_interval_ms: int = MIN_SEND_INTERVAL_MS,
         max_interval_ms: int = MAX_SEND_INTERVAL_MS,
+        frame_provider: Optional[Callable[[], List[int]]] = None,
     ) -> Tuple[bool, str]:
-        return self.start_cyclic_send_sequence(
+        """启动单帧循环；提供回调时，每个发送周期读取一份最新帧。"""
+        if frame_provider is not None and not callable(frame_provider):
+            return False, "循环发送帧提供器必须可调用"
+
+        success, error_msg = self.start_cyclic_send_sequence(
             [frame_data],
             interval_ms,
             send_mode,
             min_interval_ms,
             max_interval_ms,
         )
+        if success:
+            self.cyclic_frame_provider = frame_provider
+        return success, error_msg
 
     def start_cyclic_send_sequence(
         self,
@@ -495,6 +504,8 @@ class SerialManager(QObject):
 
         self.cyclic_data = normalized_frames[0].copy()
         self.cyclic_frame_sequence = normalized_frames
+        # 包组使用固定帧列表，避免沿用上一次单帧循环的动态数据回调。
+        self.cyclic_frame_provider = None
         self.cyclic_frame_index = 0
         self.cyclic_send_mode = send_mode
         self.send_interval_ms = interval_ms
@@ -525,17 +536,29 @@ class SerialManager(QObject):
         self.send_timer.stop()
         self.cyclic_data = None
         self.cyclic_frame_sequence = []
+        self.cyclic_frame_provider = None
         self.cyclic_frame_index = 0
         self.cyclic_send_mode = SEND_MODE_UART
         self.cyclic_min_interval_ms = MIN_SEND_INTERVAL_MS
         self.cyclic_max_interval_ms = MAX_SEND_INTERVAL_MS
 
     def _get_next_cyclic_frame(self) -> Optional[List[int]]:
+        """获取最新单帧或包组中的下一帧，并保持独立的数据副本。"""
         if not self.cyclic_frame_sequence:
             return None
 
-        frame_data = self.cyclic_frame_sequence[self.cyclic_frame_index].copy()
-        self.cyclic_frame_index = (self.cyclic_frame_index + 1) % len(self.cyclic_frame_sequence)
+        if self.cyclic_frame_provider is not None:
+            # 修复循环启动后一直重复旧帧的问题，动态帧仍须符合启动时的帧长度。
+            frame_data = normalize_frame(
+                self.cyclic_frame_provider(),
+                expected_length=len(self.cyclic_frame_sequence[0]),
+                label="循环发送帧",
+            )
+        else:
+            frame_data = self.cyclic_frame_sequence[self.cyclic_frame_index].copy()
+            self.cyclic_frame_index = (
+                self.cyclic_frame_index + 1
+            ) % len(self.cyclic_frame_sequence)
         self.cyclic_data = frame_data.copy()
         return frame_data
 
@@ -552,7 +575,13 @@ class SerialManager(QObject):
         if self.send_interval_ms < 200:
             skip_ui = (self.send_count % self.ui_update_interval) != 0
 
-        frame_data = self._get_next_cyclic_frame()
+        try:
+            frame_data = self._get_next_cyclic_frame()
+        except Exception as exc:
+            # 回调失败时停发并报告一次，避免反复异常或继续发送过期数据。
+            self.stop_cyclic_send()
+            self.send_error.emit(f"生成循环发送帧失败: {exc}")
+            return
         if frame_data is None:
             self.stop_cyclic_send()
             return

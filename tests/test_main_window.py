@@ -9,6 +9,9 @@ from PyQt5.QtWidgets import QApplication
 from gui.main_window import MainWindow
 from protocol.protocol_handler import (
     PROTOCOL_BATTERY_SINGLE_WIRE,
+    PROTOCOL_CHANGZHOU_XINSIWEI,
+    PROTOCOL_HANGZHOU_ANXIAN,
+    PROTOCOL_JINGXIAN,
     PROTOCOL_SHENZHOUXING,
     PROTOCOL_SXSY,
     PROTOCOL_XINCHI,
@@ -378,6 +381,199 @@ class MainWindowProtocolSwitchTests(unittest.TestCase):
                     len(frame),
                     self.window.protocol_handler.get_protocol_frame_length(protocol_name),
                 )
+
+
+class MainWindowLiveCyclicTests(unittest.TestCase):
+    """验证界面修改能够传入下一发送周期，不依赖真实串口硬件。"""
+
+    def setUp(self):
+        """关闭端口扫描并使用模拟串口记录真正进入写接口的帧。"""
+        detector_patch = patch.object(
+            SerialPortDetector, "start_detection", autospec=True
+        )
+        detector_patch.start()
+        self.addCleanup(detector_patch.stop)
+        self.window = MainWindow()
+        self.window.history_update_timer.stop()
+        self.addCleanup(self.window.history_update_timer.stop)
+        self.addCleanup(self.window.port_detector.stop_detection)
+        self.addCleanup(self.window.close)
+        self.manager = self.window.serial_manager
+        self.addCleanup(self.manager.stop_cyclic_send)
+        self.serial_port = Mock()
+        self.serial_port.port = "COM1"
+        self.serial_port.write.side_effect = len
+        self.manager.serial_port = self.serial_port
+        self.manager.is_connected = True
+        self.manager.tosc_us = 0
+
+    def test_battery_soc_edit_changes_next_frame_without_restarting_timer(self):
+        """验证低周期发送中修改 SOC，下一帧立即采用新电量及累加校验。"""
+        self.window.on_protocol_changed(PROTOCOL_BATTERY_SINGLE_WIRE)
+        self.window.custom_radio.click()
+        self.window.battery_single_wire_soc_spin.setValue(80)
+        self.window.interval_spin.setValue(10)
+        with patch.object(
+            self.manager.send_timer, "start", wraps=self.manager.send_timer.start
+        ) as timer_start:
+            self.window.toggle_cyclic_send()
+            self.serial_port.write.assert_not_called()
+            self.manager.send_timer.timeout.emit()
+            self.serial_port.write.assert_called_with(bytes([0, 80, 1, 1, 1, 83]))
+
+            self.window.battery_single_wire_soc_spin.setValue(25)
+            self.assertEqual(self.serial_port.write.call_count, 1)
+            self.manager.send_timer.timeout.emit()
+
+        self.serial_port.write.assert_called_with(bytes([0, 25, 1, 1, 1, 28]))
+        self.assertTrue(self.manager.is_cyclic_sending())
+        self.assertEqual(self.window.active_send_mode, "single")
+        timer_start.assert_called_once_with(10)
+
+    def test_xinri_field_edits_regenerate_payload_and_xor(self):
+        """验证循环中状态位、电流和霍尔计数修改进入新帧并重新计算异或。"""
+        self.window.on_protocol_changed(PROTOCOL_XINRI)
+        self.window.custom_radio.click()
+        self.window.hall_fault_cb.setChecked(False)
+        self.window.toggle_cyclic_send()
+        self.manager.send_timer.timeout.emit()
+        original_frame = list(self.serial_port.write.call_args[0][0])
+
+        self.window.hall_fault_cb.setChecked(True)
+        self.window.current_spin.setValue(10.2)
+        self.window.hall_count_spin.setValue(0x5678)
+        self.manager.send_timer.timeout.emit()
+
+        frame = list(self.serial_port.write.call_args[0][0])
+        self.assertFalse(original_frame[3] & 0x40)
+        self.assertTrue(frame[3] & 0x40)
+        self.assertEqual(frame[6], 0x33)
+        self.assertEqual(frame[7:9], [0x56, 0x78])
+        checksum = 0
+        for value in frame[:-1]:
+            checksum ^= value
+        self.assertEqual(frame[-1], checksum)
+
+    def test_applied_full_custom_frame_changes_next_cyclic_write(self):
+        """验证全部自定义模式已应用的帧直接生效，不被自动编码覆盖。"""
+        self.window.on_protocol_changed(PROTOCOL_BATTERY_SINGLE_WIRE)
+        self.window.frame_custom_radio.click()
+        self.window.toggle_cyclic_send()
+        self.manager.send_timer.timeout.emit()
+        custom_frame = [0, 55, 5, 6, 7, 73]
+
+        self.window.on_custom_frame_changed(custom_frame)
+        self.manager.send_timer.timeout.emit()
+
+        self.serial_port.write.assert_called_with(bytes(custom_frame))
+        self.assertTrue(self.manager.is_cyclic_sending())
+
+    def test_preset_switch_changes_next_frame_while_sending(self):
+        """验证循环过程中切换预设场景时读取新的状态对象。"""
+        self.window.on_protocol_changed(PROTOCOL_BATTERY_SINGLE_WIRE)
+        self.window.toggle_cyclic_send()
+        self.manager.send_timer.timeout.emit()
+        self.serial_port.write.assert_called_with(bytes([0, 80, 1, 1, 1, 83]))
+
+        self.window.scenario_group.button(1).click()
+        self.manager.send_timer.timeout.emit()
+
+        self.serial_port.write.assert_called_with(bytes([0, 62, 1, 1, 1, 65]))
+        self.assertTrue(self.manager.is_cyclic_sending())
+
+    def test_sequence_protocols_increment_per_tick_but_not_on_start_or_edit(self):
+        """验证流水号协议启动和预览不消耗序号，每个发送周期只递增一次。"""
+        for protocol_name, sequence_getter in (
+            (PROTOCOL_CHANGZHOU_XINSIWEI, "get_current_xinsiwei_sequence"),
+            (PROTOCOL_HANGZHOU_ANXIAN, "get_current_hangzhou_sequence"),
+            (PROTOCOL_SXSY, "get_current_sxsy_sequence"),
+            (PROTOCOL_JINGXIAN, "get_current_jingxian_sequence"),
+        ):
+            with self.subTest(protocol=protocol_name):
+                self.window.on_protocol_changed(protocol_name)
+                self.window.custom_radio.click()
+                get_sequence = getattr(self.window.protocol_handler, sequence_getter)
+                initial_sequence = get_sequence()
+                status = self.window.get_current_status_from_ui()
+                success, expected_frame, error = (
+                    self.window.generate_protocol_frame_for_preview(status)
+                )
+                self.assertTrue(success, error)
+
+                self.window.toggle_cyclic_send()
+                self.assertEqual(get_sequence(), initial_sequence)
+                self.manager.send_timer.timeout.emit()
+                self.serial_port.write.assert_called_with(bytes(expected_frame))
+                self.assertEqual(get_sequence(), initial_sequence + 1)
+
+                self.window.hall_count_spin.setValue(0x1234)
+                status = self.window.get_current_status_from_ui()
+                success, expected_frame, error = (
+                    self.window.generate_protocol_frame_for_preview(status)
+                )
+                self.assertTrue(success, error)
+                self.assertEqual(get_sequence(), initial_sequence + 1)
+                self.manager.send_timer.timeout.emit()
+                self.serial_port.write.assert_called_with(bytes(expected_frame))
+                self.assertEqual(get_sequence(), initial_sequence + 2)
+
+    def test_invalid_live_status_stops_sending_and_keeps_error_visible(self):
+        """验证动态参数无效时停发并显示原因，不继续发送上一份有效帧。"""
+        self.window.on_protocol_changed(PROTOCOL_BATTERY_SINGLE_WIRE)
+        self.window.custom_radio.click()
+        self.window.toggle_cyclic_send()
+        self.manager.send_timer.timeout.emit()
+        invalid_status = StatusBits(
+            protocol_name=PROTOCOL_BATTERY_SINGLE_WIRE, soc_percent=101
+        )
+        with patch.object(
+            self.window, "get_current_status_from_ui", return_value=invalid_status
+        ):
+            self.manager.send_timer.timeout.emit()
+            self.manager.send_timer.timeout.emit()
+
+        self.assertEqual(self.serial_port.write.call_count, 1)
+        self.assertFalse(self.manager.is_cyclic_sending())
+        self.assertIsNone(self.manager.cyclic_frame_provider)
+        self.assertIsNone(self.window.active_send_mode)
+        self.assertEqual(self.window.send_status.text(), "发送失败")
+        self.assertIn("0-100", self.window.history_text.toPlainText())
+
+    def test_packet_sequence_keeps_configured_frames_after_ui_edit(self):
+        """验证从动态循环切换到包组后，界面修改不覆盖固定包组内容。"""
+        self.window.on_protocol_changed(PROTOCOL_BATTERY_SINGLE_WIRE)
+        self.window.custom_radio.click()
+        self.window.toggle_cyclic_send()
+        frames = [[0, 80, 1, 1, 1, 83], [0, 40, 1, 1, 1, 43]]
+        self.window.packet_sequence_frames[PROTOCOL_BATTERY_SINGLE_WIRE] = frames
+        self.window.toggle_packet_sequence_send()
+        self.window.battery_single_wire_soc_spin.setValue(10)
+        payloads = []
+        for _ in range(3):
+            self.manager.send_timer.timeout.emit()
+            payloads.append(self.serial_port.write.call_args[0][0])
+
+        self.assertEqual(payloads, [bytes(frames[0]), bytes(frames[1]), bytes(frames[0])])
+        self.assertIsNone(self.manager.cyclic_frame_provider)
+        self.assertEqual(self.window.active_send_mode, "sequence")
+
+    def test_every_registered_protocol_uses_live_generation_for_cyclic_send(self):
+        """验证所有已注册协议均通过公共生成入口完成循环发送。"""
+        for protocol_name in SUPPORTED_PROTOCOLS:
+            with self.subTest(protocol=protocol_name):
+                self.window.on_protocol_changed(protocol_name)
+                self.window.custom_radio.click()
+                status = self.window.get_current_status_from_ui()
+                success, expected_frame, error = (
+                    self.window.generate_protocol_frame_for_preview(status)
+                )
+                self.assertTrue(success, error)
+
+                self.window.toggle_cyclic_send()
+                self.manager.send_timer.timeout.emit()
+
+                self.serial_port.write.assert_called_with(bytes(expected_frame))
+                self.assertTrue(self.manager.is_cyclic_sending())
 
 
 if __name__ == "__main__":

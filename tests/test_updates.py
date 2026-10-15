@@ -307,6 +307,144 @@ class InstallationTests(unittest.TestCase):
                 rename.assert_not_called()
         self.assertEqual(package.read_manifest(self.target)["version"], "1.57.0")
 
+    def test_transient_windows_directory_lock_is_retried(self):
+        """Windows 目录短暂共享占用后重试成功，不提前恢复旧版或中断升级。"""
+        plan = installer.prepare_installation(installer.load_install_job(self.job_path))
+        original_rename = os.rename
+        attempts = []
+
+        def temporarily_locked(source, destination):
+            """只让候选目录前两次改名失败，其他文件操作保持真实行为。"""
+            if Path(source) == plan.candidate:
+                attempts.append(source)
+                if len(attempts) <= 2:
+                    error = PermissionError(13, "模拟目录共享占用")
+                    error.winerror = 32
+                    raise error
+            return original_rename(source, destination)
+
+        launcher = Mock()
+        with patch.object(installer.os, "rename", side_effect=temporarily_locked):
+            with patch.object(installer.time, "sleep") as sleep:
+                installer.apply_installation(plan, launcher)
+        self.assertEqual(len(attempts), 3)
+        self.assertEqual(sleep.call_count, 2)
+        self.assertEqual(package.read_manifest(self.target)["version"], "1.58.0")
+        self.assertEqual(package.read_manifest(plan.backup)["version"], "1.57.0")
+        launcher.assert_called_once_with(self.target / APP_EXE_NAME)
+
+    def test_directory_retry_is_bounded_and_keeps_original_windows_error(self):
+        """持续占用不能无限等待，达到上限后仍保留原始系统错误对象。"""
+        for winerror in (5, 32, 33):
+            with self.subTest(winerror=winerror):
+                error = PermissionError(13, "持续占用")
+                error.winerror = winerror
+                with patch.object(installer.os, "rename", side_effect=error) as rename:
+                    with patch.object(installer.time, "sleep") as sleep:
+                        with self.assertRaises(PermissionError) as raised:
+                            installer._rename_directory("source", "destination")
+                self.assertIs(raised.exception, error)
+                self.assertEqual(error.rename_attempts, installer.RENAME_MAX_ATTEMPTS)
+                self.assertEqual(error.rename_errors, [winerror] * installer.RENAME_MAX_ATTEMPTS)
+                self.assertEqual(rename.call_count, installer.RENAME_MAX_ATTEMPTS)
+                self.assertEqual(sleep.call_count, installer.RENAME_MAX_ATTEMPTS - 1)
+
+    def test_nontransient_rename_error_is_not_retried(self):
+        """路径冲突、路径丢失和没有 Windows 错误码的异常不能被重试掩盖。"""
+        for winerror in (183, 2, None):
+            with self.subTest(winerror=winerror):
+                error = OSError(17, "路径冲突或丢失")
+                if winerror is not None:
+                    error.winerror = winerror
+                with patch.object(installer.os, "rename", side_effect=error) as rename:
+                    with patch.object(installer.time, "sleep") as sleep:
+                        with self.assertRaises(OSError):
+                            installer._rename_directory("source", "destination")
+                rename.assert_called_once_with("source", "destination")
+                sleep.assert_not_called()
+
+    def test_temporary_backup_directory_lock_is_retried(self):
+        """备份旧目录遇到短暂占用时也能重试，不局限于新版候选目录。"""
+        plan = installer.prepare_installation(installer.load_install_job(self.job_path))
+        original_rename = os.rename
+        attempts = []
+
+        def temporarily_locked_backup(source, destination):
+            """只让旧目录的前两次备份改名出现原生共享错误。"""
+            if Path(source) == plan.target:
+                attempts.append(source)
+                if len(attempts) <= 2:
+                    error = PermissionError(13, "模拟备份目录占用")
+                    error.winerror = 32
+                    raise error
+            return original_rename(source, destination)
+
+        with patch.object(installer.os, "rename", side_effect=temporarily_locked_backup):
+            with patch.object(installer.time, "sleep") as sleep:
+                installer.apply_installation(plan, Mock())
+        self.assertEqual(len(attempts), 3)
+        self.assertEqual(sleep.call_count, 2)
+        self.assertEqual(package.read_manifest(self.target)["version"], "1.58.0")
+        self.assertEqual(package.read_manifest(plan.backup)["version"], "1.57.0")
+
+    def test_rollback_directory_rename_also_retries_temporary_lock(self):
+        """安装失败后的恢复也使用有限重试，尽量避免备份不能恢复。"""
+        plan = installer.prepare_installation(installer.load_install_job(self.job_path))
+        original_rename = os.rename
+        recoveries = []
+
+        def locked_recovery(source, destination):
+            """候选目录永久冲突，旧版恢复目录只有前两次短暂占用。"""
+            if Path(source) == plan.candidate:
+                raise OSError("模拟候选目录安装失败")
+            if Path(source) == plan.backup:
+                recoveries.append(source)
+                if len(recoveries) <= 2:
+                    error = PermissionError(13, "模拟恢复目录占用")
+                    error.winerror = 5
+                    raise error
+            return original_rename(source, destination)
+
+        launcher = Mock()
+        with patch.object(installer.os, "rename", side_effect=locked_recovery):
+            with patch.object(installer.time, "sleep") as sleep:
+                with self.assertRaisesRegex(releases.UpdateError, "模拟候选目录安装失败"):
+                    installer.apply_installation(plan, launcher)
+        self.assertEqual(len(recoveries), 3)
+        self.assertEqual(sleep.call_count, 2)
+        self.assertEqual(package.read_manifest(self.target)["version"], "1.57.0")
+        launcher.assert_not_called()
+
+    def test_backup_conflict_does_not_overwrite_existing_directory(self):
+        """已有非空备份目录不能被删除或覆盖，原程序保持完整。"""
+        plan = installer.prepare_installation(installer.load_install_job(self.job_path))
+        plan.backup.mkdir()
+        sentinel = plan.backup / "keep.txt"
+        sentinel.write_text("do not overwrite", encoding="utf-8")
+        with self.assertRaisesRegex(releases.UpdateError, "原程序目录未替换"):
+            installer.apply_installation(plan, Mock())
+        self.assertEqual(sentinel.read_text(encoding="utf-8"), "do not overwrite")
+        self.assertEqual(package.read_manifest(self.target)["version"], "1.57.0")
+
+    def test_failure_status_records_root_windows_error_and_traceback(self):
+        """错误记录保留失败阶段、原始 Windows 错误码及完整异常链。"""
+        native_error = PermissionError(13, "原始共享占用详情")
+        native_error.winerror = 32
+        error = releases.UpdateError("外层安装失败提示")
+        error.__cause__ = native_error
+        parent = Mock()
+        parent.wait.side_effect = error
+        with patch.object(installer, "WindowsParentProcess", return_value=parent):
+            self.assertEqual(installer.run_installer(self.job_path), 1)
+        status = json.loads((self.staging / installer.HANDOFF_NAME).read_text(encoding="utf-8"))
+        self.assertEqual(status["stage"], "等待主程序退出")
+        self.assertEqual(status["winerror"], 32)
+        self.assertEqual(status["errno"], 13)
+        self.assertEqual(status["error_type"], "UpdateError")
+        self.assertIn("原始共享占用详情", status["detail"])
+        self.assertIn("外层安装失败提示", status["detail"])
+        self.assertEqual(package.read_manifest(self.target)["version"], "1.57.0")
+
     def test_restart_failure_restores_and_relaunches_old_version(self):
         """无法创建新版进程时回滚，并尝试重新启动旧版。"""
         plan = installer.prepare_installation(installer.load_install_job(self.job_path))

@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+import traceback
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -24,6 +25,9 @@ from .releases import UpdateCancelled, UpdateError, parse_version
 
 JOB_NAME = "update-job.json"
 HANDOFF_NAME = "handoff.json"
+RENAME_MAX_ATTEMPTS = 80
+RENAME_RETRY_DELAY_SECONDS = 0.25
+RETRYABLE_WINDOWS_ERRORS = frozenset((5, 32, 33))
 
 
 def write_status(root, status, message="", **extra):
@@ -143,6 +147,47 @@ def launch_application(executable):
     )
 
 
+def _rename_directory(source, destination):
+    """对 Windows 临时访问拒绝和共享占用有限重试，不覆盖或删除冲突目录。"""
+    started = time.monotonic()
+    errors = []
+    for attempt in range(RENAME_MAX_ATTEMPTS):
+        try:
+            os.rename(source, destination)
+            return
+        except OSError as exc:
+            errors.append(getattr(exc, "winerror", None))
+            exc.rename_attempts = attempt + 1
+            exc.rename_errors = errors.copy()
+            exc.rename_elapsed_seconds = round(time.monotonic() - started, 3)
+            # 修复更新时目录被短暂占用就立即回滚的问题；其他错误直接保留原异常。
+            if (
+                getattr(exc, "winerror", None) not in RETRYABLE_WINDOWS_ERRORS
+                or attempt + 1 == RENAME_MAX_ATTEMPTS
+            ):
+                raise
+            time.sleep(RENAME_RETRY_DELAY_SECONDS)
+
+
+def _record_install_error(staging, stage, exception):
+    """保留原始系统错误和异常链，避免安装失败日志只剩概括提示。"""
+    cause = exception
+    for _ in range(16):
+        if cause.__cause__ is None:
+            break
+        cause = cause.__cause__
+    write_status(
+        staging, "error", str(exception), stage=stage,
+        error_type=type(exception).__name__,
+        winerror=getattr(cause, "winerror", None), errno=getattr(cause, "errno", None),
+        rename_attempts=getattr(cause, "rename_attempts", None),
+        rename_errors=getattr(cause, "rename_errors", None),
+        rename_elapsed_seconds=getattr(cause, "rename_elapsed_seconds", None),
+        working_directory=os.getcwd(),
+        detail=traceback.format_exc(),
+    )
+
+
 def apply_installation(plan, launcher=launch_application):
     """通过目录改名完成替换；替换或启动失败时恢复旧版。"""
     try:
@@ -150,29 +195,40 @@ def apply_installation(plan, launcher=launch_application):
         with (plan.target / APP_EXE_NAME).open("r+b"):
             pass
     except OSError as exc:
-        raise UpdateError("程序仍被占用或没有写权限，请关闭其他工具窗口后重试") from exc
-    os.rename(plan.target, plan.backup)
+        raise UpdateError(
+            f"程序仍被占用或没有写权限，请关闭其他工具窗口后重试\n系统原因：{exc}"
+        ) from exc
     try:
-        os.rename(plan.candidate, plan.target)
+        _rename_directory(plan.target, plan.backup)
+    except OSError as exc:
+        raise UpdateError(f"备份旧版本失败，原程序目录未替换\n系统原因：{exc}") from exc
+    try:
+        _rename_directory(plan.candidate, plan.target)
     except Exception as exc:
         try:
-            os.rename(plan.backup, plan.target)
+            _rename_directory(plan.backup, plan.target)
         except OSError as restore_error:
-            raise UpdateError(f"安装失败且恢复未完成，请从以下目录恢复：{plan.backup}") from restore_error
-        raise UpdateError("安装失败，旧版本已恢复") from exc
+            raise UpdateError(
+                f"安装失败且恢复未完成，请从以下目录恢复：{plan.backup}\n"
+                f"安装原因：{exc}\n恢复原因：{restore_error}"
+            ) from restore_error
+        raise UpdateError(f"安装失败，旧版本已恢复\n系统原因：{exc}") from exc
     try:
         launcher(plan.target / APP_EXE_NAME)
     except Exception as exc:
         try:
-            os.rename(plan.target, plan.candidate)
-            os.rename(plan.backup, plan.target)
+            _rename_directory(plan.target, plan.candidate)
+            _rename_directory(plan.backup, plan.target)
         except OSError as restore_error:
-            raise UpdateError(f"新版启动失败，请从以下目录恢复：{plan.backup}") from restore_error
+            raise UpdateError(
+                f"新版启动失败，请从以下目录恢复：{plan.backup}\n"
+                f"启动原因：{exc}\n恢复原因：{restore_error}"
+            ) from restore_error
         try:
             launcher(plan.target / APP_EXE_NAME)
         except OSError:
             pass
-        raise UpdateError("新版未能启动，旧版本已恢复") from exc
+        raise UpdateError(f"新版未能启动，旧版本已恢复\n系统原因：{exc}") from exc
     return plan.backup
 
 
@@ -235,16 +291,21 @@ def run_installer(job_path):
     parent = None
     plan = None
     parent_exited = False
+    stage = "读取安装任务"
     try:
         job = load_install_job(job_path)
         staging = job["staging"]
+        stage = "验证主程序进程"
         parent = WindowsParentProcess(job["parent_pid"], job["target"] / APP_EXE_NAME)
+        stage = "准备同盘候选目录"
         plan = prepare_installation(job)
         if (staging / "cancel.request").exists():
             raise UpdateCancelled("已取消安装准备")
         write_status(staging, "ready")
+        stage = "等待主程序退出"
         parent.wait(lambda: (staging / "cancel.request").exists())
         parent_exited = True
+        stage = "替换目录并重启"
         backup = apply_installation(plan)
         write_status(staging, "complete", "升级完成", backup=str(backup))
         # 更新器自身仍在运行，保留它及结果文件，只清理已使用的大体积下载和解压副本。
@@ -254,7 +315,7 @@ def run_installer(job_path):
     except Exception as exc:
         try:
             validate_staging_directory(staging)
-            write_status(staging, "error", str(exc))
+            _record_install_error(staging, stage, exc)
         except (OSError, UpdateError):
             pass
         if parent_exited and os.name == "nt":

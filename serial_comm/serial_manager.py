@@ -10,7 +10,7 @@ from typing import Callable, List, Optional, Tuple
 
 import serial
 import serial.tools.list_ports
-from PyQt5.QtCore import QObject, Qt, QTimer, pyqtSignal
+from PyQt5.QtCore import QObject, Qt, QTimer, pyqtSignal, pyqtSlot
 
 from protocol.definitions import (
     DEFAULT_SEND_INTERVAL_MS,
@@ -18,6 +18,8 @@ from protocol.definitions import (
     MIN_SEND_INTERVAL_MS,
 )
 from protocol.frame_utils import normalize_frame
+from .send_worker import SendWorker
+from .timing import SendStatistics, uart_frame_time_ms
 
 
 SEND_MODE_UART = "uart"
@@ -75,9 +77,23 @@ class SerialManager(QObject):
     data_sent = pyqtSignal(list, str)
     send_error = pyqtSignal(str)
     connection_error = pyqtSignal(str)
+    timing_warning = pyqtSignal(str)
+    statistics_changed = pyqtSignal(dict)
 
-    def __init__(self):
+    def __init__(self, background_send=False):
+        """默认保留同步调用契约，界面可显式启用后台串口写入。"""
         super().__init__()
+        if not isinstance(background_send, bool):
+            raise ValueError("后台发送选项必须是布尔值")
+        self.background_send = background_send
+        self.statistics = SendStatistics()
+        self._worker = None
+        self._send_generation = 0
+        self._deferred_frame = None
+        self._closing_port = False
+        self._last_warning_at = -10.0
+        self._last_statistics_at = -10.0
+        self._blocked_since = None
         self.serial_port: Optional[serial.Serial] = None
         self.is_connected = False
         self.send_timer = QTimer(self)
@@ -107,6 +123,11 @@ class SerialManager(QObject):
 
     def connect_port(self, port_name: str, baud_rate: int = 9600) -> Tuple[bool, str]:
         """连接指定串口，并确保失败后不会遗留假连接状态。"""
+
+        if self._closing_port or self.is_write_pending():
+            error_msg = "上一帧仍在发送或串口正在断开，请稍后再连接"
+            self.connection_error.emit(error_msg)
+            return False, error_msg
 
         if not isinstance(port_name, str) or not port_name.strip():
             error_msg = "串口名称不能为空"
@@ -160,6 +181,12 @@ class SerialManager(QObject):
     def disconnect_port(self) -> bool:
         """断开当前串口；即使底层关闭异常也强制清理软件状态。"""
 
+        # 修复后台写入与关闭串口并发的问题：等待当前帧结果后再关闭，不在界面线程等写超时。
+        if self._worker is not None and self._worker.busy:
+            self.stop_cyclic_send()
+            self._closing_port = True
+            return False
+        self._closing_port = False
         port = self.serial_port
         was_connected = self.is_connected
         port_name = getattr(port, "port", "") if port is not None else ""
@@ -210,6 +237,7 @@ class SerialManager(QObject):
         skip_ui_update: bool = False,
         send_mode: str = SEND_MODE_UART,
     ) -> Tuple[bool, str]:
+        """同步模式返回实际写入结果，后台模式返回接收结果并通过原信号报告完成。"""
         if not self.is_connected or not self.serial_port:
             return False, "串口未连接"
 
@@ -219,6 +247,9 @@ class SerialManager(QObject):
         )
         if normalized_frame is None:
             return False, error_msg
+
+        if self.background_send:
+            return self._submit_background_frame(normalized_frame, skip_ui_update, send_mode)
 
         if send_mode == SEND_MODE_BATTERY_SINGLE_WIRE:
             return self._send_battery_single_wire_frame(normalized_frame, skip_ui_update)
@@ -235,10 +266,7 @@ class SerialManager(QObject):
             bytes_written = self.serial_port.write(data_bytes)
 
             if bytes_written == expected_length:
-                idle_time_ms = (32 * self.tosc_us) / 1000.0
-                if idle_time_ms > 0:
-                    QTimer.singleShot(int(idle_time_ms), lambda: None)
-
+                # 原空 singleShot 回调不产生帧间等待；间隔仍由循环调度和转码平台负责。
                 if not skip_ui_update:
                     timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
                     self.data_sent.emit(frame_data, timestamp)
@@ -466,6 +494,10 @@ class SerialManager(QObject):
     ) -> Tuple[bool, str]:
         if not self.is_connected or self.serial_port is None:
             return False, "串口未连接"
+        if self._closing_port:
+            return False, "串口正在断开，请稍后重试"
+        if self._worker is not None and self._worker.busy:
+            return False, "上一帧仍在发送，请稍后重试"
         if not isinstance(frame_sequence, (list, tuple)):
             return False, "循环数据包组必须是帧列表"
         if not frame_sequence:
@@ -513,6 +545,9 @@ class SerialManager(QObject):
         self.cyclic_max_interval_ms = max_interval_ms
         self.send_count = 0
 
+        self.statistics.reset()
+        self._deferred_frame = None
+        self._blocked_since = None
         self.send_timer.start(interval_ms)
         return True, ""
 
@@ -533,7 +568,10 @@ class SerialManager(QObject):
         return True, ""
 
     def stop_cyclic_send(self):
+        """停止调度并作废旧帧结果，不能撤销已在线路上传输的字节。"""
         self.send_timer.stop()
+        self._send_generation += 1
+        self._deferred_frame = None
         self.cyclic_data = None
         self.cyclic_frame_sequence = []
         self.cyclic_frame_provider = None
@@ -541,6 +579,8 @@ class SerialManager(QObject):
         self.cyclic_send_mode = SEND_MODE_UART
         self.cyclic_min_interval_ms = MIN_SEND_INTERVAL_MS
         self.cyclic_max_interval_ms = MAX_SEND_INTERVAL_MS
+        # 停止时立即刷新最后统计，避免 10Hz 节流导致界面少显示末尾已确认的帧。
+        self.statistics_changed.emit(self.statistics.snapshot())
 
     def _get_next_cyclic_frame(self) -> Optional[List[int]]:
         """获取最新单帧或包组中的下一帧，并保持独立的数据副本。"""
@@ -570,13 +610,19 @@ class SerialManager(QObject):
             self.stop_cyclic_send()
             return
 
+        if self._worker is not None and self._worker.busy:
+            # 修复慢写时不断生成旧快照的问题；忙时不读取 UI、不消耗协议流水号。
+            self.statistics.deferred_ticks += 1
+            return
+
         self.send_count += 1
         skip_ui = False
         if self.send_interval_ms < 200:
             skip_ui = (self.send_count % self.ui_update_interval) != 0
 
         try:
-            frame_data = self._get_next_cyclic_frame()
+            frame_data = self._deferred_frame or self._get_next_cyclic_frame()
+            self._deferred_frame = None
         except Exception as exc:
             # 回调失败时停发并报告一次，避免反复异常或继续发送过期数据。
             self.stop_cyclic_send()
@@ -592,7 +638,10 @@ class SerialManager(QObject):
             send_mode=self.cyclic_send_mode,
         )
 
-        if skip_ui and not success:
+        # 后台提交被同步拒绝时不会有完成信号，必须主动报告，防止界面仍显示循环中。
+        if (skip_ui or self.background_send) and not success:
+            if self.background_send:
+                self.statistics.errors += 1
             self.send_error.emit(error_msg)
 
         if self.send_count >= 100:
@@ -601,8 +650,147 @@ class SerialManager(QObject):
         if not success:
             self.stop_cyclic_send()
 
+    def _submit_background_frame(self, frame_data, skip_ui_update, send_mode):
+        """提交独立字节快照，返回值表示已接受，真实结果由原发送信号报告。"""
+        if self._closing_port:
+            return False, "串口正在断开，请稍后重试"
+        if self._worker is None:
+            self._worker = SendWorker(self._perform_background_frame, self)
+            self._worker.completed.connect(self._on_background_result)
+        if send_mode == SEND_MODE_UART:
+            try:
+                wire_ms = uart_frame_time_ms(len(frame_data), self.serial_port.baudrate)
+            except (AttributeError, TypeError, ValueError):
+                return False, "串口波特率状态无效，请重新连接串口"
+            if self.is_cyclic_sending() and wire_ms > self.send_interval_ms:
+                self._warn_timing(
+                    f"当前帧理论传输约 {wire_ms:.2f}ms，超过设置的 {self.send_interval_ms}ms；"
+                    "实际周期可能变长，请核对波特率和转码平台处理能力"
+                )
+        job = {
+            "frame": tuple(frame_data), "skip_ui": skip_ui_update, "mode": send_mode,
+            "generation": self._send_generation, "port": self.serial_port,
+            "cyclic": self.is_cyclic_sending(),
+        }
+        if not self._worker.submit(job):
+            return False, "串口正在发送上一帧，请稍后重试"
+        return True, ""
+
+    def _perform_background_frame(self, job):
+        """只在工作线程执行串口 I/O，不读取控件，不关闭串口或操作界面定时器。"""
+        started = time.monotonic()
+        result = {"job": job, "success": False, "error": "", "started": started}
+        if job["generation"] != self._send_generation:
+            result["cancelled"] = True
+            return result
+        port, frame = job["port"], list(job["frame"])
+        try:
+            if job["mode"] == SEND_MODE_UART:
+                pending = getattr(port, "out_waiting", 0)
+                pending = pending if type(pending) is int and pending >= 0 else 0
+                result["queue_bytes"] = pending
+                if job["cyclic"] and pending > len(frame) * 2:
+                    # 只保留一个待重试快照，不继续向驱动堆积，也不丢弃包组顺序。
+                    result["throttled"] = True
+                    return result
+                port.break_condition = False
+                written = port.write(bytes(frame))
+                result["success"] = written == len(frame)
+                if not result["success"]:
+                    result["error"] = f"数据发送不完整，期望{len(frame)}字节，实际发送{written}字节"
+                pending = getattr(port, "out_waiting", 0)
+                result["queue_bytes"] = pending if type(pending) is int and pending >= 0 else 0
+            else:
+                methods = {
+                    SEND_MODE_BATTERY_SINGLE_WIRE: self._send_battery_single_wire_frame,
+                    SEND_MODE_LUYUAN_BMS_SIF: self._send_luyuan_bms_sif_frame,
+                    SEND_MODE_JINGXIAN_SIF: self._send_jingxian_sif_frame,
+                }
+                result["success"], result["error"] = methods[job["mode"]](frame, True)
+        except serial.SerialTimeoutException:
+            result["success"] = False
+            result["error"] = "串口发送超时"
+        except (serial.SerialException, OSError) as exc:
+            result["success"] = False
+            result["error"] = f"串口发送失败: {exc}"
+            result["disconnect"] = True
+        except Exception as exc:
+            result["success"] = False
+            result["error"] = f"发送数据时发生未知错误: {exc}"
+        finally:
+            result["write_ms"] = (time.monotonic() - started) * 1000.0
+            result["timestamp"] = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        return result
+
+    @pyqtSlot(object)
+    def _on_background_result(self, result):
+        """在管理器所属线程处理完成结果和断开请求，旧循环结果不污染新界面。"""
+        self._worker.acknowledge()
+        job = result["job"]
+        if self._closing_port:
+            self.statistics.record(result)
+            self.disconnect_port()
+            return
+        if job["generation"] != self._send_generation:
+            if not self.is_cyclic_sending():
+                # 在途帧仍可能真正写出；只补计旧轮次统计，不触发旧发送信号或停止新轮次。
+                self.statistics.record(result)
+                self.statistics_changed.emit(self.statistics.snapshot())
+            return
+        self.statistics.record(result)
+        now = time.monotonic()
+        if now - self._last_statistics_at >= 0.1 or (not result.get("success") and not result.get("throttled")):
+            self._last_statistics_at = now
+            self.statistics_changed.emit(self.statistics.snapshot())
+        if result.get("cancelled"):
+            return
+        if result.get("throttled"):
+            if job["cyclic"] and self.is_cyclic_sending():
+                self._deferred_frame = list(job["frame"])
+                now = time.monotonic()
+                if self._blocked_since is None:
+                    self._blocked_since = now
+                if now - self._blocked_since >= 3.0:
+                    self.statistics.errors += 1
+                    self.stop_cyclic_send()
+                    self.send_error.emit("串口发送缓冲持续积压，已停止循环；请检查硬件连接和波特率")
+                else:
+                    self._warn_timing("串口发送缓冲积压，正在等待排空；实际周期可能大于设定值")
+            return
+        self._blocked_since = None
+        if result.get("success"):
+            if not job["skip_ui"]:
+                timestamp = result["timestamp"]
+                self.data_sent.emit(list(job["frame"]), timestamp)
+            return
+        self.stop_cyclic_send()
+        if result.get("disconnect"):
+            self.disconnect_port()
+        self.send_error.emit(result["error"] or "串口发送失败")
+
+    def _warn_timing(self, message):
+        """时序风险最多每两秒提示一次，不用弹窗打断发送。"""
+        now = time.monotonic()
+        if now - self._last_warning_at >= 2.0:
+            self._last_warning_at = now
+            self.timing_warning.emit(message)
+
+    def shutdown(self, timeout_ms=2000):
+        """关闭前停止调度并等待在途写入，超时不释放仍在使用的串口。"""
+        self.stop_cyclic_send()
+        if self._worker is not None:
+            if not self._worker.shutdown(timeout_ms):
+                return False
+            self._worker.acknowledge()
+        self._closing_port = False
+        return self.disconnect_port()
+
     def is_cyclic_sending(self) -> bool:
         return self.send_timer.isActive()
+
+    def is_write_pending(self) -> bool:
+        """查询后台写入是否仍在途，不读取串口驱动状态。"""
+        return self._worker is not None and self._worker.busy
 
     def set_tosc_value(self, tosc_us: int) -> bool:
         if (
@@ -623,6 +811,7 @@ class SerialManager(QObject):
             "cyclic_frame_count": len(self.cyclic_frame_sequence),
             "send_interval_ms": self.send_interval_ms,
             "tosc_us": self.tosc_us,
+            "statistics": self.statistics.snapshot(),
         }
 
 

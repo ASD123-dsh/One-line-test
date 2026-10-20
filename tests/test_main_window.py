@@ -1,12 +1,16 @@
 import os
+import time
 import unittest
 from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt5.QtWidgets import QApplication
+from PyQt5.QtCore import QSignalBlocker
+from PyQt5.QtTest import QTest
 
 from gui.main_window import MainWindow
+from app_settings import SettingsStore
 from protocol.protocol_handler import (
     PROTOCOL_BATTERY_SINGLE_WIRE,
     PROTOCOL_CHANGZHOU_XINSIWEI,
@@ -31,7 +35,7 @@ class MainWindowIntervalTests(unittest.TestCase):
         detector_patch.start()
         self.addCleanup(detector_patch.stop)
 
-        self.window = MainWindow()
+        self.window = MainWindow(settings_store=SettingsStore())
         self.window.history_update_timer.stop()
         self.addCleanup(self.window.history_update_timer.stop)
         self.addCleanup(self.window.port_detector.stop_detection)
@@ -78,7 +82,7 @@ class MainWindowShenzhouxingTests(unittest.TestCase):
         detector_patch.start()
         self.addCleanup(detector_patch.stop)
 
-        self.window = MainWindow()
+        self.window = MainWindow(settings_store=SettingsStore())
         self.window.history_update_timer.stop()
         self.addCleanup(self.window.history_update_timer.stop)
         self.addCleanup(self.window.port_detector.stop_detection)
@@ -156,7 +160,7 @@ class MainWindowSxsyTests(unittest.TestCase):
         detector_patch.start()
         self.addCleanup(detector_patch.stop)
 
-        self.window = MainWindow()
+        self.window = MainWindow(settings_store=SettingsStore())
         self.window.history_update_timer.stop()
         self.addCleanup(self.window.history_update_timer.stop)
         self.addCleanup(self.window.port_detector.stop_detection)
@@ -221,7 +225,7 @@ class MainWindowProtocolSwitchTests(unittest.TestCase):
         detector_patch.start()
         self.addCleanup(detector_patch.stop)
 
-        self.window = MainWindow()
+        self.window = MainWindow(settings_store=SettingsStore())
         self.window.history_update_timer.stop()
         self.addCleanup(self.window.history_update_timer.stop)
         self.addCleanup(self.window.port_detector.stop_detection)
@@ -393,7 +397,7 @@ class MainWindowLiveCyclicTests(unittest.TestCase):
         )
         detector_patch.start()
         self.addCleanup(detector_patch.stop)
-        self.window = MainWindow()
+        self.window = MainWindow(settings_store=SettingsStore())
         self.window.history_update_timer.stop()
         self.addCleanup(self.window.history_update_timer.stop)
         self.addCleanup(self.window.port_detector.stop_detection)
@@ -402,10 +406,22 @@ class MainWindowLiveCyclicTests(unittest.TestCase):
         self.addCleanup(self.manager.stop_cyclic_send)
         self.serial_port = Mock()
         self.serial_port.port = "COM1"
+        self.serial_port.baudrate = 9600
+        self.serial_port.out_waiting = 0
         self.serial_port.write.side_effect = len
         self.manager.serial_port = self.serial_port
         self.manager.is_connected = True
         self.manager.tosc_us = 0
+
+    def emit_tick(self):
+        """提交一个真实发送周期并等待后台结果，屏蔽额外自动周期以保持断言确定性。"""
+        self.manager.send_timer.timeout.emit()
+        blocker = QSignalBlocker(self.manager.send_timer)
+        deadline = time.monotonic() + 1.5
+        while self.manager._worker is not None and self.manager._worker.busy:
+            self.assertLess(time.monotonic(), deadline, "后台帧未在限定时间内完成")
+            QTest.qWait(1)
+        del blocker
 
     def test_battery_soc_edit_changes_next_frame_without_restarting_timer(self):
         """验证低周期发送中修改 SOC，下一帧立即采用新电量及累加校验。"""
@@ -418,12 +434,12 @@ class MainWindowLiveCyclicTests(unittest.TestCase):
         ) as timer_start:
             self.window.toggle_cyclic_send()
             self.serial_port.write.assert_not_called()
-            self.manager.send_timer.timeout.emit()
+            self.emit_tick()
             self.serial_port.write.assert_called_with(bytes([0, 80, 1, 1, 1, 83]))
 
             self.window.battery_single_wire_soc_spin.setValue(25)
             self.assertEqual(self.serial_port.write.call_count, 1)
-            self.manager.send_timer.timeout.emit()
+            self.emit_tick()
 
         self.serial_port.write.assert_called_with(bytes([0, 25, 1, 1, 1, 28]))
         self.assertTrue(self.manager.is_cyclic_sending())
@@ -436,13 +452,13 @@ class MainWindowLiveCyclicTests(unittest.TestCase):
         self.window.custom_radio.click()
         self.window.hall_fault_cb.setChecked(False)
         self.window.toggle_cyclic_send()
-        self.manager.send_timer.timeout.emit()
+        self.emit_tick()
         original_frame = list(self.serial_port.write.call_args[0][0])
 
         self.window.hall_fault_cb.setChecked(True)
         self.window.current_spin.setValue(10.2)
         self.window.hall_count_spin.setValue(0x5678)
-        self.manager.send_timer.timeout.emit()
+        self.emit_tick()
 
         frame = list(self.serial_port.write.call_args[0][0])
         self.assertFalse(original_frame[3] & 0x40)
@@ -459,11 +475,11 @@ class MainWindowLiveCyclicTests(unittest.TestCase):
         self.window.on_protocol_changed(PROTOCOL_BATTERY_SINGLE_WIRE)
         self.window.frame_custom_radio.click()
         self.window.toggle_cyclic_send()
-        self.manager.send_timer.timeout.emit()
+        self.emit_tick()
         custom_frame = [0, 55, 5, 6, 7, 73]
 
         self.window.on_custom_frame_changed(custom_frame)
-        self.manager.send_timer.timeout.emit()
+        self.emit_tick()
 
         self.serial_port.write.assert_called_with(bytes(custom_frame))
         self.assertTrue(self.manager.is_cyclic_sending())
@@ -472,11 +488,11 @@ class MainWindowLiveCyclicTests(unittest.TestCase):
         """验证循环过程中切换预设场景时读取新的状态对象。"""
         self.window.on_protocol_changed(PROTOCOL_BATTERY_SINGLE_WIRE)
         self.window.toggle_cyclic_send()
-        self.manager.send_timer.timeout.emit()
+        self.emit_tick()
         self.serial_port.write.assert_called_with(bytes([0, 80, 1, 1, 1, 83]))
 
         self.window.scenario_group.button(1).click()
-        self.manager.send_timer.timeout.emit()
+        self.emit_tick()
 
         self.serial_port.write.assert_called_with(bytes([0, 62, 1, 1, 1, 65]))
         self.assertTrue(self.manager.is_cyclic_sending())
@@ -502,18 +518,24 @@ class MainWindowLiveCyclicTests(unittest.TestCase):
 
                 self.window.toggle_cyclic_send()
                 self.assertEqual(get_sequence(), initial_sequence)
-                self.manager.send_timer.timeout.emit()
+                self.emit_tick()
                 self.serial_port.write.assert_called_with(bytes(expected_frame))
                 self.assertEqual(get_sequence(), initial_sequence + 1)
 
-                self.window.hall_count_spin.setValue(0x1234)
+                # 等待后台发送会处理旧页销毁事件，必须访问当前协议实际使用的控件。
+                hall_spin = (
+                    self.window.xinsiwei_hall_count_spin
+                    if protocol_name == PROTOCOL_CHANGZHOU_XINSIWEI
+                    else self.window.hall_count_spin
+                )
+                hall_spin.setValue(0x1234)
                 status = self.window.get_current_status_from_ui()
                 success, expected_frame, error = (
                     self.window.generate_protocol_frame_for_preview(status)
                 )
                 self.assertTrue(success, error)
                 self.assertEqual(get_sequence(), initial_sequence + 1)
-                self.manager.send_timer.timeout.emit()
+                self.emit_tick()
                 self.serial_port.write.assert_called_with(bytes(expected_frame))
                 self.assertEqual(get_sequence(), initial_sequence + 2)
 
@@ -522,15 +544,15 @@ class MainWindowLiveCyclicTests(unittest.TestCase):
         self.window.on_protocol_changed(PROTOCOL_BATTERY_SINGLE_WIRE)
         self.window.custom_radio.click()
         self.window.toggle_cyclic_send()
-        self.manager.send_timer.timeout.emit()
+        self.emit_tick()
         invalid_status = StatusBits(
             protocol_name=PROTOCOL_BATTERY_SINGLE_WIRE, soc_percent=101
         )
         with patch.object(
             self.window, "get_current_status_from_ui", return_value=invalid_status
         ):
-            self.manager.send_timer.timeout.emit()
-            self.manager.send_timer.timeout.emit()
+            self.emit_tick()
+            self.emit_tick()
 
         self.assertEqual(self.serial_port.write.call_count, 1)
         self.assertFalse(self.manager.is_cyclic_sending())
@@ -550,7 +572,7 @@ class MainWindowLiveCyclicTests(unittest.TestCase):
         self.window.battery_single_wire_soc_spin.setValue(10)
         payloads = []
         for _ in range(3):
-            self.manager.send_timer.timeout.emit()
+            self.emit_tick()
             payloads.append(self.serial_port.write.call_args[0][0])
 
         self.assertEqual(payloads, [bytes(frames[0]), bytes(frames[1]), bytes(frames[0])])
@@ -570,7 +592,7 @@ class MainWindowLiveCyclicTests(unittest.TestCase):
                 self.assertTrue(success, error)
 
                 self.window.toggle_cyclic_send()
-                self.manager.send_timer.timeout.emit()
+                self.emit_tick()
 
                 self.serial_port.write.assert_called_with(bytes(expected_frame))
                 self.assertTrue(self.manager.is_cyclic_sending())

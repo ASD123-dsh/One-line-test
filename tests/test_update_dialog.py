@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""验证问号菜单、自动下载、用户确认和更新器握手，不访问真实网络。"""
+"""验证统一工具菜单、自动下载、用户确认和更新器握手，不访问真实网络。"""
 
 import os
 import unittest
@@ -12,6 +12,7 @@ from PyQt5.QtWidgets import QApplication, QMessageBox, QToolButton
 
 from app_info import APP_VERSION
 from gui.main_window import MainWindow
+from app_settings import SettingsStore
 from gui.update_dialog import UpdateDialog, UpdateWorker
 from serial_comm.serial_manager import SerialPortDetector
 from updating.controller import PreparedUpdate
@@ -21,24 +22,50 @@ _APP = QApplication.instance() or QApplication([])
 
 
 class UpdateMenuTests(unittest.TestCase):
-    """问号菜单沿用原位置和反馈页面。"""
+    """更新和反馈并入工具菜单，继续复用原处理流程。"""
 
     def setUp(self):
         """创建主窗口并禁用端口扫描，测试不操作真实串口。"""
         detector = patch.object(SerialPortDetector, "start_detection", autospec=True)
         detector.start()
         self.addCleanup(detector.stop)
-        self.window = MainWindow()
+        self.window = MainWindow(settings_store=SettingsStore())
         self.window.history_update_timer.stop()
         self.addCleanup(self.window.close)
 
-    def test_question_button_has_exactly_two_menu_items(self):
-        """按钮保留问号和尺寸，只增加检测更新与扫码反馈两项。"""
-        self.assertEqual(self.window.feedback_btn.text(), "?")
-        self.assertEqual(self.window.feedback_btn.popupMode(), QToolButton.InstantPopup)
-        self.assertEqual(self.window.feedback_btn.width(), 42)
-        self.assertEqual([action.text() for action in self.window.help_menu.actions()], ["检测更新", "扫码反馈"])
+    def test_single_tools_button_contains_all_grouped_menu_items(self):
+        """右上角只保留一个按钮，原配置诊断和更新反馈按组排列且不重复。"""
+        button = self.window.tools_btn
+        self.assertEqual(button.text(), "配置 / 诊断")
+        self.assertEqual(button.popupMode(), QToolButton.InstantPopup)
+        self.assertEqual(button.parentWidget().findChildren(QToolButton), [button])
+        self.assertIs(self.window.feedback_btn, button)
+        self.assertIs(self.window.help_menu, button.menu())
+        self.assertEqual([
+            None if action.isSeparator() else action.text()
+            for action in button.menu().actions()
+        ], [
+            "导入配置…", "导出配置…", "记住本机配置（默认关闭）", None,
+            "导出脱敏诊断…", "查看升级恢复指引", None, "检测更新", "扫码反馈",
+        ])
         self.assertIn(APP_VERSION, self.window.windowTitle())
+
+    def test_configuration_and_diagnostic_actions_keep_existing_routes(self):
+        """统一菜单仍调用原导入、导出和恢复入口，取消文件选择不改变默认配置。"""
+        actions = {action.text(): action for action in self.window.tools_btn.menu().actions()}
+        with patch("gui.settings_panel.QFileDialog.getOpenFileName", return_value=("", "")) as choose:
+            actions["导入配置…"].trigger()
+        choose.assert_called_once()
+        for text in ("导出配置…", "导出脱敏诊断…"):
+            with patch("gui.settings_panel.QFileDialog.getSaveFileName", return_value=("", "")) as choose:
+                actions[text].trigger()
+            choose.assert_called_once()
+        with patch("gui.settings_panel.QMessageBox.information") as guidance:
+            actions["查看升级恢复指引"].trigger()
+        guidance.assert_called_once()
+        self.assertFalse(self.window.remember_settings_action.isChecked())
+        self.assertEqual(self.window.interval_spin.value(), 500)
+        self.assertFalse(self.window.serial_manager.is_connected)
 
     def test_update_action_opens_dialog_without_changing_feedback_route(self):
         """两项菜单各自调用更新对话框和原反馈对话框。"""

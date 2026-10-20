@@ -1,0 +1,5 @@
+# Windows x64 / Python 3.11.9 的已验证运行依赖基线；不自动升级客户环境。
+-r requirements.txt
+PyQt5-Qt5==5.15.2
+PyQt5-sip==12.18.0
+pyasn1==0.6.3

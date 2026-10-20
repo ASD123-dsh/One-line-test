@@ -20,6 +20,7 @@ class ProtocolUiRegistryTests(unittest.TestCase):
                 self.assertTrue(callable(getattr(MainWindow, ui_spec.switch_handler, None)))
                 self.assertTrue(callable(getattr(MainWindow, ui_spec.preset_loader, None)))
                 self.assertTrue(callable(getattr(MainWindow, ui_spec.status_reader, None)))
+                self.assertTrue(callable(getattr(MainWindow, ui_spec.status_writer, None)))
 
     def test_unknown_protocol_has_explicit_error(self):
         with self.assertRaisesRegex(ValueError, "不支持的协议界面"):

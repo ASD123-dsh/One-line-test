@@ -15,7 +15,8 @@ from PyQt5.QtWidgets import QApplication
 from PyQt5.QtGui import QIcon, QFont
 from PyQt5.QtCore import QTimer
 
-from app_paths import resource_path
+from app_paths import resource_path, user_data_directory
+from diagnostics import configure_logging
 from app_info import APP_VERSION
 from gui.activation_dialog import ActivationDialog
 from gui.main_window import MainWindow
@@ -27,7 +28,9 @@ def _write_exception_log(file_name: str) -> None:
     """记录当前异常，同时避免日志写入失败掩盖原始异常。"""
 
     try:
-        with open(file_name, "w", encoding="utf-8") as file_obj:
+        log_root = user_data_directory() / "logs"
+        log_root.mkdir(parents=True, exist_ok=True)
+        with (log_root / file_name).open("w", encoding="utf-8") as file_obj:
             traceback.print_exc(file=file_obj)
     except OSError:
         pass
@@ -35,14 +38,15 @@ def _write_exception_log(file_name: str) -> None:
 
 def main() -> None:
     """主程序入口"""
+    configure_logging()
     # 创建应用程序实例
     app = QApplication(sys.argv)
-    
+
     # 设置应用程序属性
     app.setApplicationName("瑞轮仪表一线通协议测试软件")
     app.setApplicationVersion(APP_VERSION)
     app.setOrganizationName("瑞轮仪表")
-    
+
     # 设置全局字体
     font = QFont("Microsoft YaHei", 9)
     app.setFont(font)
@@ -64,7 +68,7 @@ def main() -> None:
     main_window.show()
     # 进入 GUI 事件循环后才确认启动，不以创建进程成功替代界面就绪。
     QTimer.singleShot(0, notify_startup_ready)
-    
+
     # 运行应用程序
     try:
         sys.exit(app.exec_())

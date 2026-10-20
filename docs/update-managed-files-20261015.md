@@ -135,7 +135,8 @@ SHA-256：`9cf8f32b2bc7c8c3dc6a5da71a3aca1a31576ac2048fbad1fee31eb67e96a1e2`。
 
 2026-10-15 已按用户要求统一整理路径。最新完整程序固定为
 `dist/AD仪表一线通协议测试工具/`，升级测试根目录为 `dist/升级测试/`。
-分发主包为 `dist/升级测试/release/AD-OneLine-v1.58.2-windows-x64-managed.zip`
+正式分发主包为
+`dist/历史归档/正式发行版/v1.58.2/AD-OneLine-v1.58.2-windows-x64-managed.zip`
 （49,441,919 字节）。原 `dist/local-tests/` 已移除，旧程序及历史 ZIP 归入
 `dist/历史归档/`；整理和恢复方式见 [目录清理记录](workspace-cleanup-20261015.md)。
 主包 SHA-256：`143311ff2388ceb2e87769282683b73e42306b61441c43c149ae5892ff0f8f7c`。
@@ -145,8 +146,12 @@ SHA-256：`9cf8f32b2bc7c8c3dc6a5da71a3aca1a31576ac2048fbad1fee31eb67e96a1e2`。
 通过故意占用独立测试 EXE 验证失败回滚。每次都新建旧版副本，不覆盖之前测试；
 按控制台提示操作，可在本次测试目录中加入其他应用或文件，勿连接硬件串口。
 `LocalUpdateTest.exe` 只是本地验收入口，不属于客户正式分发附件，也不访问 GitHub。
-测试步骤见 `dist/升级测试/本地测试说明.md`，机器可读历史结果见
-`packaging-verification.json` 和 `reports/`。此前已完成的两个自动验收副本已清理；
+测试步骤见 `dist/升级测试/本地测试说明.md`，正式发布与打包验证记录见
+`dist/历史归档/正式发行版/v1.58.2/` 中的 `release-publication.json` 和
+`packaging-verification.json`；两个场景的历史通过记录保留在测试目录 `reports/`。
+测试目录 `release/` 仅保留已打包入口必需的 managed ZIP 缓存，不作为正式发行位置。
+此次补齐及后续自动收尾流程见 [正式发行版归档记录](release-archive-20261015.md)。
+此前已完成的两个自动验收副本已清理；
 重新运行入口时会创建新的 `cases/`，不要清理用户正在测试或未完成回滚的副本。
 历史结果保留当时的原始路径，路径变更以目录清理记录为准，不改写历史测试证据。
 

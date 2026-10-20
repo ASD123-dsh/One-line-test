@@ -4,6 +4,8 @@ __pycache__/
 *$py.class
 
 # Distribution / packaging
+# 新生成程序与正式归档留在本地或 GitHub Releases；不自动移除历史已跟踪文件。
+/dist/
 build/
 develop-eggs/
 downloads/

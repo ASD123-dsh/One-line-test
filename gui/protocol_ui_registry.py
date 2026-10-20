@@ -41,6 +41,7 @@ class ProtocolUiSpec:
     switch_handler: str
     preset_loader: str
     status_reader: str
+    status_writer: str = "update_ruilun_ui_from_status"
 
 
 PROTOCOL_UI_SPECS: Mapping[str, ProtocolUiSpec] = MappingProxyType({
@@ -48,91 +49,109 @@ PROTOCOL_UI_SPECS: Mapping[str, ProtocolUiSpec] = MappingProxyType({
         "switch_to_ruilun_protocol",
         "load_ruilun_preset_scenario",
         "get_ruilun_status_from_ui",
+        "update_ruilun_ui_from_status",
     ),
     PROTOCOL_FZ_SIF: ProtocolUiSpec(
         "switch_to_fz_sif_protocol",
         "load_fz_sif_preset_scenario",
         "get_ruilun_status_from_ui",
+        "update_ruilun_ui_from_status",
     ),
     PROTOCOL_XINRI: ProtocolUiSpec(
         "switch_to_xinri_protocol",
         "load_xinri_preset_scenario",
         "get_xinri_status_from_ui",
+        "update_xinri_ui_from_status",
     ),
     PROTOCOL_HANGZHOU_ANXIAN: ProtocolUiSpec(
         "switch_to_hangzhou_anxian_protocol",
         "load_hangzhou_anxian_preset_scenario",
         "get_ruilun_status_from_ui",
+        "update_ruilun_ui_from_status",
     ),
     PROTOCOL_SXSY: ProtocolUiSpec(
         "switch_to_sxsy_protocol",
         "load_sxsy_preset_scenario",
         "get_ruilun_status_from_ui",
+        "update_ruilun_ui_from_status",
     ),
     PROTOCOL_CHANGZHOU_XINSIWEI: ProtocolUiSpec(
         "switch_to_changzhou_xinsiwei_protocol",
         "load_changzhou_xinsiwei_preset_scenario",
         "get_changzhou_xinsiwei_status_from_ui",
+        "update_changzhou_xinsiwei_ui_from_status",
     ),
     PROTOCOL_WUXI_YIGE: ProtocolUiSpec(
         "switch_to_wuxi_yige_protocol",
         "load_wuxi_yige_preset_scenario",
         "get_ruilun_status_from_ui",
+        "update_ruilun_ui_from_status",
     ),
     PROTOCOL_TAILING_Y34B: ProtocolUiSpec(
         "switch_to_tailing_y34b_protocol",
         "load_tailing_y34b_preset_scenario",
         "get_ruilun_status_from_ui",
+        "update_ruilun_ui_from_status",
     ),
     PROTOCOL_TAILING_Y34F: ProtocolUiSpec(
         "switch_to_tailing_y34f_protocol",
         "load_tailing_y34f_preset_scenario",
         "get_ruilun_status_from_ui",
+        "update_ruilun_ui_from_status",
     ),
     PROTOCOL_SHENZHOUXING: ProtocolUiSpec(
         "switch_to_shenzhouxing_protocol",
         "load_shenzhouxing_preset_scenario",
         "get_ruilun_status_from_ui",
+        "update_ruilun_ui_from_status",
     ),
     PROTOCOL_YADEA: ProtocolUiSpec(
         "switch_to_yadea_protocol",
         "load_yadea_preset_scenario",
         "get_ruilun_status_from_ui",
+        "update_ruilun_ui_from_status",
     ),
     PROTOCOL_YOUYIBAO: ProtocolUiSpec(
         "switch_to_youyibao_protocol",
         "load_youyibao_preset_scenario",
         "get_ruilun_status_from_ui",
+        "update_ruilun_ui_from_status",
     ),
     PROTOCOL_JINGXIAN: ProtocolUiSpec(
         "switch_to_jingxian_protocol",
         "load_jingxian_preset_scenario",
         "get_ruilun_status_from_ui",
+        "update_ruilun_ui_from_status",
     ),
     PROTOCOL_DONGWEI_GTXH: ProtocolUiSpec(
         "switch_to_dongwei_gtxh_protocol",
         "load_dongwei_gtxh_preset_scenario",
         "get_ruilun_status_from_ui",
+        "update_ruilun_ui_from_status",
     ),
     PROTOCOL_XINCHI: ProtocolUiSpec(
         "switch_to_xinchi_protocol",
         "load_xinchi_preset_scenario",
         "get_xinchi_status_from_ui",
+        "update_xinchi_ui_from_status",
     ),
     PROTOCOL_LUYUAN_BMS: ProtocolUiSpec(
         "switch_to_luyuan_bms_protocol",
         "load_luyuan_bms_preset_scenario",
         "get_luyuan_bms_status_from_ui",
+        "update_luyuan_bms_ui_from_status",
     ),
     PROTOCOL_LITHIUM_BMS: ProtocolUiSpec(
         "switch_to_lithium_bms_protocol",
         "load_lithium_bms_preset_scenario",
         "get_lithium_bms_status_from_ui",
+        "update_lithium_bms_ui_from_status",
     ),
     PROTOCOL_BATTERY_SINGLE_WIRE: ProtocolUiSpec(
         "switch_to_battery_single_wire_protocol",
         "load_battery_single_wire_preset_scenario",
         "get_battery_single_wire_status_from_ui",
+        "update_battery_single_wire_ui_from_status",
     ),
 })
 

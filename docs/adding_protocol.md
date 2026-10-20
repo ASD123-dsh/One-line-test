@@ -90,14 +90,15 @@ PROTOCOL_DEFINITIONS = MappingProxyType({
 
 ## 4. 实现校验与帧生成
 
-在 `protocol/protocol_handler.py` 中完成以下工作：
+在 `protocol/codecs/` 新建协议组件，不将编码逻辑堆回公共门面：
 
-1. 在 `validate_status_bits()` 中增加协议专用参数校验。
-2. 新增注册表所指向的帧生成方法。
+1. 在 `protocol/validation.py` 的 `validate_status_bits()` 中增加协议专用参数校验。
+2. 在新组件中实现注册表所指向的帧生成方法；在 `codecs/__init__.py` 导出，并加入
+   `ProtocolHandler` 的兼容方法集合。原有公开方法名和返回结构保持不变。
 3. 根据规格书逐字节赋值，并显式处理端序、比例和符号。
 4. 复用已有 XOR/累加和等公共方法，但必须确认算法及覆盖范围一致。
-5. 在 `get_byte_descriptions()` 中补充与实际帧长度一致的字节说明。
-6. 为正常、能量回收、故障场景补充 `PresetScenarios` 工厂方法。
+5. 在 `protocol/descriptions.py` 中补充与实际帧长度一致的不可变字节说明。
+6. 在 `protocol/presets.py` 的 `PresetScenarios` 中补充三种预设工厂方法。
 
 帧生成方法继续使用现有返回契约：
 
@@ -127,6 +128,7 @@ PROTOCOL_DEFINITIONS = MappingProxyType({
 - `switch_handler`：初始化该协议状态并创建/复用配置界面
 - `preset_loader`：把当前场景预设加载到界面
 - `status_reader`：从界面读取并返回 `StatusBits`
+- `status_writer`：将状态恢复到配置页，供配置导入和可选记忆使用
 
 示意：
 
@@ -137,12 +139,16 @@ PROTOCOL_UI_SPECS = MappingProxyType({
         switch_handler="switch_to_vendor_model_protocol",
         preset_loader="load_vendor_model_preset_scenario",
         status_reader="get_vendor_model_status_from_ui",
+        status_writer="update_vendor_model_ui_from_status",
     ),
 })
 ```
 
 优先复用通用状态页，并根据规格书调整标签、范围和禁用的保留位。只有字段布局差异
 明显时才创建专用页面。无论采用哪种方式，都要保证：
+
+- 新专用页放在 `gui/protocol_pages/`，在组件导出文件和主窗口声明中接入；
+  不在 `gui/main_window.py` 直接追加大量控件、字段读取和预设恢复逻辑。
 
 - UI 注册表键与 `PROTOCOL_DEFINITIONS` 完全一致。
 - 切换协议后状态模型、帧长度、字节说明和包组长度同步更新。
@@ -151,7 +157,7 @@ PROTOCOL_UI_SPECS = MappingProxyType({
 - 信号只连接一次，重建页签时释放旧控件。
 
 如果仓库中的 `ProtocolUiSpec` 字段名后续调整，应以该文件当前定义为准，但仍应
-维持“切换、场景加载、状态读取”三个职责的集中映射。
+维持切换、场景加载、状态读取及状态恢复的集中映射。
 
 ## 6. 统一校验自定义帧
 
@@ -208,10 +214,10 @@ $env:QT_QPA_PLATFORM = "offscreen"
 python -m unittest discover -s tests -v
 ```
 
-Python 语法编译检查：
+统一源码检查（不生成字节码、不调用编译器或打包器）：
 
 ```powershell
-python -m compileall -q main.py app_paths.py gui licensing protocol serial_comm tools tests
+python -B tools/check_project.py
 ```
 
 如果只修改一个协议，可先运行对应测试模块，再执行完整测试。例如：
@@ -232,7 +238,7 @@ python -m unittest tests.test_protocol_handler -v
 4. 示波器/逻辑分析仪抓取的帧与规格书字段对应关系。
 5. 目标仪表/BMS 对正常、边界和故障场景的实际响应。
 
-`unittest` 和 `compileall` 只能证明 Python 软件层结果；它们不能证明：
+单元测试与只读语法分析只能证明 Python 软件层结果；它们不能证明：
 
 - 转码平台 C 驱动已在全志 Melis SDK 和目标老编译器中通过编译
 - UART 字节已经被正确转换为目标单线波形
@@ -250,5 +256,5 @@ python -m unittest tests.test_protocol_handler -v
 - [ ] UI 注册表和协议注册表键集合一致
 - [ ] 自定义帧使用 `frame_utils.py` 校验
 - [ ] 已知向量、边界、异常和 UI 测试已通过
-- [ ] 全量单元测试与 Python 语法编译检查已通过
+- [ ] 全量单元测试与只读 Python 语法检查已通过
 - [ ] Melis C 驱动编译状态与真实硬件验证状态已分别记录

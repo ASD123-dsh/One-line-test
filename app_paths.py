@@ -7,7 +7,16 @@
 """
 
 import sys
+import os
 from pathlib import Path
+from app_info import APP_ID
+
+
+def user_data_directory() -> Path:
+    """返回本工具专属用户数据目录，不把配置或诊断写入混放安装目录。"""
+    local = os.environ.get("LOCALAPPDATA")
+    base = Path(local) if local and Path(local).is_absolute() else Path.home() / "AppData" / "Local"
+    return base / APP_ID
 
 
 def resource_path(*parts: str) -> str:

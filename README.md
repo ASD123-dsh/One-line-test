@@ -2,6 +2,17 @@
 
 一个基于 Python、PyQt5 和 pyserial 的 PC 端协议测试工具，用于生成多种电动车仪表/BMS 协议帧，通过串口发送，并提供状态配置、场景预设、帧预览和发送记录。
 
+当前版本 **V1.58.3** 包含 [源码优化](docs/optimization-20261019.md) 与
+[菜单合并](docs/menu-unification-20261019.md)，已通过用户验收。完整 Windows 软件请使用
+[GitHub Releases](https://github.com/ASD123-dsh/One-line-test/releases/tag/v1.58.3)
+的发行 ZIP，功能、迁移限制与校验值见 [V1.58.3 发布说明](docs/releases/v1.58.3.md)。
+
+本地唯一正常使用入口为
+`dist/AD仪表一线通协议测试工具/AD仪表一线通协议测试工具.exe`，完整目录必须一起保留。
+右上角“配置 / 诊断”菜单现已包含“检测更新”和“扫码反馈”，不再显示独立问号按钮。
+历史发行包、必要旧版基线和备份均保留；正式归档统一在
+`dist/历史归档/正式发行版/v<版本>/`，以实际发布核验记录为准。
+
 ## 主要功能
 
 - **18 种协议**：协议元数据集中注册，可在界面中切换。
@@ -9,8 +20,12 @@
 - **场景预设**：提供正常运行、能量回收和故障场景；具体字段以对应协议规格书为准。
 - **发送方式**：支持单帧、循环发送和自定义包组循环。
 - **发送监控**：显示十六进制帧、发送时间和发送结果。
+- **后台写入与统计**：界面生成最新帧快照，工作线程串行写入；缓冲积压时限流，
+  显示写入计数、周期及待发字节，避免慢串口堵塞界面。
+- **配置与诊断**：右上角统一“配置 / 诊断”菜单，支持配置导入导出、可选本机
+  记忆和脱敏诊断。记忆默认关闭，导入不自动连接或开始发送。
 - **帧输入校验**：统一校验帧长度、字节类型及 `0-255` 范围，避免非法自定义帧进入发送流程。
-- **手动检测更新**：右上角 `?` 提供“检测更新”和“扫码反馈”；发现新版自动下载，
+- **手动检测更新**：同一“配置 / 诊断”菜单提供“检测更新”和“扫码反馈”；发现新版自动下载，
   完整性校验后由用户确认升级并重启。
 
 ## 支持协议
@@ -45,7 +60,7 @@
 ### 环境要求
 
 - Windows 10/11
-- Python 3.8 或更高版本
+- 已验证开发基线为 Python 3.11.9 x64；其他 Python 环境尚未验证
 - 与目标设备电气特性匹配的串口转换/转码硬件
 
 ### 安装步骤
@@ -55,7 +70,7 @@ git clone https://github.com/ASD123-dsh/One-line-test.git
 cd One-line-test
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
+python -m pip install -r requirements-lock.txt
 ```
 
 运行时依赖包括：
@@ -83,6 +98,11 @@ python main.py
 重启。自动生成帧会重新计算校验，带流水号的协议每个发送周期递增；预览和
 启动校验不消耗流水号。参数或帧数据无效时自动停发，并在发送历史中显示原因。
 “包组循环”继续按已配置的帧列表轮流发送，循环期间主界面的字段修改不覆盖包组。
+
+发送时最多一份后台在途任务。慢写期间暂缓生成下一帧，不提前消耗流水号；驱动
+缓冲积压时仅保留一个待重试帧，并保持包组顺序。已经提交给驱动的在途字节不能
+撤回，动态修改从下一份尚未提交的快照起生效。持续积压约 3 秒会停止循环并提示。
+统计中的周期是软件写入调用间隔，不是单线侧波形的硬件实测值。
 
 > 当前协议注册表为兼容既有行为，18 种协议的主机侧 `send_mode` 均为
 > `uart`。程序在这一契约下生成字节帧并写入串口；规格书中的单线脉宽、
@@ -116,7 +136,7 @@ BYTE6 仍为前五字节的 8 位累加和。例如 SOC 为 `80%` 时生成
 软件版本集中维护在 `app_info.py`，当前版本为 `1.58.2`。完整程序请从
 [GitHub Releases](https://github.com/ASD123-dsh/One-line-test/releases/tag/v1.58.2)
 下载，推荐带 `managed` 的 ZIP；不要用仓库中的历史二进制文件代替完整发行包。用户点击右上角
-`? → 检测更新` 后查询本仓库 GitHub Releases；发现新版会自动下载完整 ZIP，
+`配置 / 诊断 → 检测更新` 后查询本仓库 GitHub Releases；发现新版会自动下载完整 ZIP，
 校验通过后再由用户确认“升级并重启”。“扫码反馈”继续打开原有页面。
 
 作者使用 `python tools/build_release.py` 生成带独立更新器的完整发布包，上传到
@@ -138,19 +158,27 @@ One-line-test/
 ├── main.py                         # 程序入口与全局异常记录
 ├── app_paths.py                    # 开发环境/打包环境资源路径
 ├── gui/
-│   ├── main_window.py              # 主窗口和协议参数界面
-│   ├── protocol_ui_registry.py     # 协议对应的切换、预设和状态读取入口
+│   ├── main_window.py              # 主窗口协调及发送控制
+│   ├── protocol_pages/             # 按协议组织的配置页与状态绑定
+│   ├── settings_panel.py           # 配置、诊断与恢复指引入口
+│   ├── protocol_ui_registry.py     # 协议切换、预设及状态读写入口
 │   ├── frame_config_dialog.py      # 单帧配置
 │   └── packet_sequence_dialog.py   # 包组配置及导入导出
 ├── protocol/
 │   ├── definitions.py              # 不可变协议元数据注册表
 │   ├── models.py                   # ProtocolConfig、StatusBits 数据模型
 │   ├── frame_utils.py              # 帧长度和字节范围公共校验
-│   └── protocol_handler.py         # 参数校验、帧编码、校验和、场景预设
+│   ├── codecs/                     # 各协议帧编码及流水号实现
+│   ├── validation.py               # 参数校验
+│   ├── descriptions.py             # 不可变字节说明
+│   ├── presets.py                  # 预设场景
+│   └── protocol_handler.py         # 保持旧接口的公共门面与共享编码辅助
 ├── serial_comm/
-│   └── serial_manager.py           # 串口连接、单帧与循环发送
+│   ├── serial_manager.py           # 串口连接、帧快照调度与结果处理
+│   ├── send_worker.py              # 单一在途任务的后台写入线程
+│   └── timing.py                   # 线速估算和写入统计
 ├── licensing/                      # 本地授权校验
-├── tools/                          # 授权辅助工具
+├── tools/                          # 源码检查、发布归档与授权辅助
 ├── tests/                          # 单元测试和无界面 GUI 测试
 ├── docs/
 │   └── adding_protocol.md          # 新增协议开发指南
@@ -162,7 +190,7 @@ One-line-test/
 
 - `definitions.py` 只描述协议元数据和分发入口，不实现字节编码。
 - `models.py` 保存协议层与界面层共享的数据，不依赖 Qt 控件。
-- `protocol_handler.py` 校验模型并生成帧；发送帧与预览帧统一通过注册表分发。
+- `protocol_handler.py` 保留原导出入口；发送帧与预览帧统一通过注册表分发到独立组件。
 - `protocol_ui_registry.py` 维护协议到界面处理方法的映射，减少主窗口中的重复分支。
 - `frame_utils.py` 为单帧配置、包组配置和串口发送提供同一套帧数据校验。
 - `serial_manager.py` 负责传输，不解释协议字段。
@@ -184,17 +212,16 @@ One-line-test/
 
 ## 开发验证
 
-在 PowerShell 中执行无界面单元测试：
+在 PowerShell 中执行统一检查（只解析语法和运行测试，不编译或打包）：
 
 ```powershell
-$env:QT_QPA_PLATFORM = "offscreen"
-python -m unittest discover -s tests -v
+python -B tools/check_project.py
 ```
 
-执行 Python 语法编译检查：
+仅执行只读语法分析：
 
 ```powershell
-python -m compileall -q main.py app_paths.py gui licensing protocol serial_comm tools tests
+python -B tools/check_project.py --static-only
 ```
 
 以上命令不等同于：

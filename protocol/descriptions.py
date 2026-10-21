@@ -14,6 +14,7 @@ from .definitions import (
     PROTOCOL_HANGZHOU_ANXIAN,
     PROTOCOL_JINGXIAN,
     PROTOCOL_LITHIUM_BMS,
+    PROTOCOL_LISHEN_BMS,
     PROTOCOL_LUYUAN_BMS,
     PROTOCOL_RUILUN,
     PROTOCOL_SHENZHOUXING,
@@ -279,6 +280,14 @@ _BYTE_DESCRIPTIONS = MappingProxyType({
         "BYTE4 测试默认 0x01 (规格书 0x00)",
         "BYTE5 测试默认 0x01 (规格书 0x00)",
         "BYTE6 8 位累加校验和",
+    ),
+    PROTOCOL_LISHEN_BMS: (
+        "Byte1 保留 (固定 0x00)",
+        "Byte2 电池剩余容量 SOC (1%/bit)",
+        "Byte3 电池总电压 (1V/bit)",
+        "Byte4 电池温度 (1℃/bit，有符号8位补码)",
+        "Byte5 保留 (固定 0x00)",
+        "Byte6 前5字节累加和低8位",
     ),
 })
 

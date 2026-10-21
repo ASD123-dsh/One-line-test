@@ -29,6 +29,7 @@ PROTOCOL_XINCHI = "芯驰BMS协议"
 PROTOCOL_LUYUAN_BMS = "绿源BMS一线通协议"
 PROTOCOL_LITHIUM_BMS = "一线通--锂电池BMS"
 PROTOCOL_BATTERY_SINGLE_WIRE = "电池单线通讯协议"
+PROTOCOL_LISHEN_BMS = "锂神单线BMS"
 
 # 发送周期的软件边界。默认值保持 500ms，仅放宽可配置下限。
 MIN_SEND_INTERVAL_MS = 10
@@ -242,6 +243,16 @@ PROTOCOL_DEFINITIONS: Mapping[str, ProtocolDefinition] = MappingProxyType({
         checksum_mode="sum",
         send_mode="uart",
         generator_method="_generate_battery_single_wire_frame",
+        reset_send_interval_on_switch=True,
+    ),
+    PROTOCOL_LISHEN_BMS: ProtocolDefinition(
+        name=PROTOCOL_LISHEN_BMS,
+        frame_length=6,
+        checksum_mode="sum",
+        send_mode="uart",
+        generator_method="_generate_lishen_bms_frame",
+        # 规格书建议 1～2 秒；保留 10～5000ms 测试范围，仅本协议默认 1000ms。
+        default_send_interval_ms=1000,
         reset_send_interval_on_switch=True,
     ),
 })

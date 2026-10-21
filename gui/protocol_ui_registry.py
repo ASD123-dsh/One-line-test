@@ -19,6 +19,7 @@ from protocol.definitions import (
     PROTOCOL_HANGZHOU_ANXIAN,
     PROTOCOL_JINGXIAN,
     PROTOCOL_LITHIUM_BMS,
+    PROTOCOL_LISHEN_BMS,
     PROTOCOL_LUYUAN_BMS,
     PROTOCOL_RUILUN,
     PROTOCOL_SHENZHOUXING,
@@ -152,6 +153,12 @@ PROTOCOL_UI_SPECS: Mapping[str, ProtocolUiSpec] = MappingProxyType({
         "load_battery_single_wire_preset_scenario",
         "get_battery_single_wire_status_from_ui",
         "update_battery_single_wire_ui_from_status",
+    ),
+    PROTOCOL_LISHEN_BMS: ProtocolUiSpec(
+        "switch_to_lishen_bms_protocol",
+        "load_lishen_bms_preset_scenario",
+        "get_lishen_bms_status_from_ui",
+        "update_lishen_bms_ui_from_status",
     ),
 })
 

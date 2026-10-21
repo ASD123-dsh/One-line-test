@@ -256,3 +256,26 @@ python -B tools/archive_release.py `
 与 [checkout](https://github.com/actions/checkout) 配置固定 Python 基线。
 CI 的 `--require-tracked` 会检查新增源码是否遗漏；本地尚未提交时可先运行普通检查。
 新增发行产物默认忽略，不批量删除或改写已跟踪的历史二进制文件。
+
+## 锂神协议 V1.58.4 发布
+
+2026-10-21 按用户确认，将本地版本改为 V1.58.4 并打包“锂神单线BMS”。
+完整程序统一放在 `dist/AD仪表一线通协议测试工具/`。用户随后确认新协议正常、
+原有协议未受影响，并授权提交、合并和发布。直接使用已验收的两个 ZIP 与校验文件，
+不重新编译，不改变协议实现、依赖、更新器或 UI 主题。
+
+正式公开、标签和线上附件核验通过后，执行：
+
+```powershell
+python -B tools/archive_release.py `
+  --source "dist/历史归档/本地修复包/v1.58.4-lishen-20261021" `
+  --record "build/release-v1.58.4-20261021/release-publication.json" `
+  --notes "docs/releases/v1.58.4.md" `
+  --verification "dist/历史归档/本地修复包/v1.58.4-lishen-20261021/packaging-verification.json" `
+  --prune-source
+```
+
+归档后重复核验改用 `dist/历史归档/正式发行版/v1.58.4/` 的源附件、发布记录和验证文件。
+发布前源码备份为 `dist/历史归档/发布前源码-v1.58.4-20261021.zip`；本地构建证据见
+[V1.58.4 本地打包记录](local-package-v1.58.4-20261021.md)。
+公开状态和线上下载结果只能根据真实核验记录填写，不能以打包成功或用户验收代替。

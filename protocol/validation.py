@@ -14,6 +14,7 @@ from .definitions import (
     PROTOCOL_FZ_SIF,
     PROTOCOL_JINGXIAN,
     PROTOCOL_LITHIUM_BMS,
+    PROTOCOL_LISHEN_BMS,
     PROTOCOL_LUYUAN_BMS,
     PROTOCOL_SHENZHOUXING,
     PROTOCOL_SXSY,
@@ -35,6 +36,18 @@ class StatusValidation:
             return False, "协议状态必须是 StatusBits 对象"
 
         protocol_name = self.resolve_protocol_name(status)
+        if protocol_name == PROTOCOL_LISHEN_BMS:
+            # 1V/bit、1℃/bit 均为整数字节，禁止用取模掩盖越界或小数输入。
+            for label, value, minimum, maximum in (
+                ("SOC", status.soc_percent, 0, 100),
+                ("总电压", status.lishen_total_voltage_v, 0, 255),
+                ("电池温度", status.lishen_temperature_c, -128, 127),
+            ):
+                if isinstance(value, bool) or not isinstance(value, int):
+                    return False, f"锂神单线BMS {label}必须是整数"
+                if not minimum <= value <= maximum:
+                    return False, f"锂神单线BMS {label}必须在 {minimum}-{maximum} 范围内"
+
         if isinstance(status.current_a, bool) or not isinstance(status.current_a, (int, float)):
             return False, "运行电流必须是数值"
         current_a = float(status.current_a)

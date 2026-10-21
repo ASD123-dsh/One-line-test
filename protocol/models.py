@@ -182,3 +182,7 @@ class StatusBits:
     # 0x00 用于规格书示例；0x0F/0x0D/0x0E 分别表示无 P 档、P 档常亮和闪烁。
     sxsy_p_gear_state: int = 0x00
     sxsy_three_speed: bool = False
+
+    # 锂神单线 BMS V1.1.1：追加字段，不改变已有位置参数的顺序。
+    lishen_total_voltage_v: int = 48
+    lishen_temperature_c: int = 25

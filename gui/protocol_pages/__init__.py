@@ -6,6 +6,7 @@ from .xinchi import XinchiPages
 from .luyuan import LuyuanBmsPages
 from .lithium import LithiumBmsPages
 from .battery import BatterySingleWirePages
+from .lishen import LishenBmsPages
 from .xinsiwei import XinsiweiPages
 from .xinri import XinriPages
 from .common_forms import CommonProtocolForms

@@ -12,6 +12,7 @@ from .definitions import (
     PROTOCOL_HANGZHOU_ANXIAN,
     PROTOCOL_JINGXIAN,
     PROTOCOL_LITHIUM_BMS,
+    PROTOCOL_LISHEN_BMS,
     PROTOCOL_LUYUAN_BMS,
     PROTOCOL_RUILUN,
     PROTOCOL_SHENZHOUXING,
@@ -802,3 +803,28 @@ class PresetScenarios:
         status = StatusBits(protocol_name=PROTOCOL_BATTERY_SINGLE_WIRE)
         status.soc_percent = 15
         return status
+
+    @staticmethod
+    def lishen_bms_normal_running() -> StatusBits:
+        """创建常温正常数据；本协议不含运行/故障等状态标志。"""
+        return StatusBits(protocol_name=PROTOCOL_LISHEN_BMS)
+
+    @staticmethod
+    def lishen_bms_energy_recovery() -> StatusBits:
+        """提供回收场景测试数据，不虚构协议未定义的充电或回收位。"""
+        return StatusBits(
+            protocol_name=PROTOCOL_LISHEN_BMS,
+            soc_percent=62,
+            lishen_total_voltage_v=49,
+            lishen_temperature_c=30,
+        )
+
+    @staticmethod
+    def lishen_bms_fault_scenario() -> StatusBits:
+        """提供低电量/高温测试数据，不代表规格书定义了故障阈值或标志。"""
+        return StatusBits(
+            protocol_name=PROTOCOL_LISHEN_BMS,
+            soc_percent=15,
+            lishen_total_voltage_v=42,
+            lishen_temperature_c=75,
+        )

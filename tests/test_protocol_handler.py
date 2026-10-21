@@ -19,6 +19,7 @@ from protocol.protocol_handler import (
     PROTOCOL_HANGZHOU_ANXIAN,
     PROTOCOL_JINGXIAN,
     PROTOCOL_LITHIUM_BMS,
+    PROTOCOL_LISHEN_BMS,
     PROTOCOL_LUYUAN_BMS,
     PROTOCOL_RUILUN,
     PROTOCOL_TAILING_Y34B,
@@ -51,8 +52,9 @@ class ProtocolHandlerTests(unittest.TestCase):
         percentage_index = field_names.index("current_percentage")
 
         self.assertEqual(field_names[percentage_index + 1], "voltage_24v")
+        legacy_tail_index = field_names.index("lithium_bms_min_cell_voltage_v")
         self.assertEqual(
-            field_names[-3:],
+            field_names[legacy_tail_index:legacy_tail_index + 3],
             [
                 "lithium_bms_min_cell_voltage_v",
                 "sxsy_p_gear_state",
@@ -84,7 +86,7 @@ class ProtocolHandlerTests(unittest.TestCase):
             )
             self.assertEqual(
                 definition.default_send_interval_ms,
-                DEFAULT_SEND_INTERVAL_MS,
+                1000 if protocol_name == PROTOCOL_LISHEN_BMS else DEFAULT_SEND_INTERVAL_MS,
             )
             self.assertTrue(
                 callable(getattr(self.handler, definition.generator_method))

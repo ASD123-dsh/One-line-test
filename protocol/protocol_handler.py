@@ -18,6 +18,7 @@ from .definitions import (
     PROTOCOL_HANGZHOU_ANXIAN,
     PROTOCOL_JINGXIAN,
     PROTOCOL_LITHIUM_BMS,
+    PROTOCOL_LISHEN_BMS,
     PROTOCOL_LUYUAN_BMS,
     PROTOCOL_RUILUN,
     PROTOCOL_SHENZHOUXING,
@@ -51,6 +52,7 @@ from .codecs import (
     LuyuanCodec,
     LithiumCodec,
     BatteryCodec,
+    LishenBmsCodec,
 )
 from .constants import SXSY_P_GEAR_STATES, VOLTAGE_OPTIONS
 from .descriptions import get_byte_descriptions as _get_byte_descriptions
@@ -76,6 +78,7 @@ class ProtocolHandler(
     LuyuanCodec,
     LithiumCodec,
     BatteryCodec,
+    LishenBmsCodec,
     StatusValidation,
 ):
     """保持旧接口的协议门面；各协议实现与公共调度分开维护。"""

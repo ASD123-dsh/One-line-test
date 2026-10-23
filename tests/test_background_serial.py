@@ -6,6 +6,8 @@ import os
 import threading
 import time
 import unittest
+from datetime import datetime
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -13,7 +15,10 @@ from PyQt5.QtCore import QTimer
 from PyQt5.QtTest import QTest
 from PyQt5.QtWidgets import QApplication
 
+from app_settings import SettingsStore
+from gui.main_window import MainWindow
 from serial_comm.serial_manager import SerialManager
+from serial_comm.serial_manager import SerialPortDetector
 from serial_comm.timing import uart_frame_time_ms
 
 _APP = QApplication.instance() or QApplication([])
@@ -251,6 +256,86 @@ class BackgroundSerialTests(unittest.TestCase):
         self.assertIn(b"\x01", self.port.payloads)
         self.assertIn(b"\x07", self.port.payloads)
         self.assertTrue(all(identifier == threading.get_ident() for identifier in provider_threads))
+
+    def test_fast_background_cycles_report_every_confirmed_write(self):
+        """后台10～500ms均逐帧报告，不能再每10帧采样一次。"""
+        seen = []
+        self.manager.data_sent.connect(lambda frame, timestamp: seen.append(frame))
+        with patch.object(self.manager.send_timer, "start"), patch.object(self.manager, "is_cyclic_sending", return_value=True):
+            for interval in (10, 50, 100, 199, 200, 500):
+                with self.subTest(interval=interval):
+                    seen.clear()
+                    self.assertTrue(self.manager.start_cyclic_send([1, 2], interval)[0])
+                    for index in range(12):
+                        self.manager._send_cyclic_data()
+                        self.wait_until(lambda: self.manager.statistics.sent_frames == index + 1)
+                        self.assertEqual(len(seen), index + 1)
+                    self.assertEqual(seen, [[1, 2]] * 12)
+                    self.manager.stop_cyclic_send()
+
+    def test_fast_background_sequence_logs_every_packet_in_original_order(self):
+        """快速包组保留每次实际写入及原顺序，不能仅显示包组中被抽样的帧。"""
+        seen = []
+        self.manager.data_sent.connect(lambda frame, timestamp: seen.append(bytes(frame)))
+        with patch.object(self.manager.send_timer, "start"), patch.object(self.manager, "is_cyclic_sending", return_value=True):
+            self.assertTrue(self.manager.start_cyclic_send_sequence([[1], [2], [3]], 50)[0])
+            for index in range(12):
+                self.manager._send_cyclic_data()
+                self.wait_until(lambda: self.manager.statistics.sent_frames == index + 1)
+        self.assertEqual(seen, [b"\x01", b"\x02", b"\x03"] * 4)
+        self.assertEqual(seen, self.port.payloads)
+
+    def test_explicit_background_skip_ui_parameter_keeps_original_contract(self):
+        """取消自动采样不影响外部调用显式要求跳过成功信号的参数。"""
+        seen = []
+        self.manager.data_sent.connect(lambda frame, timestamp: seen.append(frame))
+        self.assertTrue(self.manager.send_single_frame([7], skip_ui_update=True)[0])
+        self.wait_until(lambda: self.manager.statistics.sent_frames == 1)
+        self.assertEqual(self.port.payloads, [b"\x07"])
+        self.assertEqual(seen, [])
+
+    def test_fast_cycle_keeps_real_worker_timestamps_without_synthesizing_intervals(self):
+        """完成时间逐帧原样传递，不按设置间隔伪造整齐的时间戳。"""
+        seen = []
+        self.manager.data_sent.connect(lambda frame, timestamp: seen.append(timestamp))
+        moments = (datetime(2026, 10, 22, 20, 52, 51, 364000), datetime(2026, 10, 22, 20, 52, 51, 426000), datetime(2026, 10, 22, 20, 52, 51, 481000))
+        with patch.object(self.manager.send_timer, "start"), patch.object(self.manager, "is_cyclic_sending", return_value=True), patch("serial_comm.serial_manager.datetime") as clock:
+            self.assertTrue(self.manager.start_cyclic_send([1], 50)[0])
+            for index, moment in enumerate(moments):
+                clock.now.return_value = moment
+                self.manager._send_cyclic_data()
+                self.wait_until(lambda: self.manager.statistics.sent_frames == index + 1)
+        self.assertEqual(seen, ["20:52:51.364", "20:52:51.426", "20:52:51.481"])
+
+    def test_fast_cycle_reaches_history_table_and_legacy_text_without_sampling(self):
+        """界面仍批量刷新，但每个后台成功写入都进入表格和兼容文本。"""
+        with patch("gui.main_window.SerialManager", return_value=self.manager), patch.object(SerialPortDetector, "start_detection"), patch.object(SerialManager, "scan_ports", return_value=[]), patch.object(MainWindow, "refresh_recovery_notice"):
+            window = MainWindow(settings_store=SettingsStore())
+        self.addCleanup(window.close)
+        with patch.object(self.manager.send_timer, "start"), patch.object(self.manager, "is_cyclic_sending", return_value=True):
+            self.assertTrue(self.manager.start_cyclic_send([1, 2], 50)[0])
+            for index in range(12):
+                self.manager._send_cyclic_data()
+                self.wait_until(lambda: self.manager.statistics.sent_frames == index + 1)
+        window._flush_history_updates()
+        model = window.history_view.history_model
+        self.assertEqual(model.rowCount(), 12)
+        self.assertEqual(window.history_text.toPlainText().count("发送成功: 01 02"), 12)
+        self.assertTrue(all(model.data(model.index(index, 2)) == "01 02" for index in range(12)))
+
+    def test_fast_background_failure_does_not_create_success_history(self):
+        """逐帧记录不把失败写入伪装为成功，也不改变停止和错误通知。"""
+        seen, errors = [], []
+        self.manager.data_sent.connect(lambda frame, timestamp: seen.append(frame))
+        self.manager.send_error.connect(errors.append)
+        self.port.error = OSError("unplugged")
+        self.manager.start_cyclic_send([1], 50)
+        self.manager._send_cyclic_data()
+        self.wait_until(lambda: bool(errors))
+        self.assertEqual(seen, [])
+        self.assertEqual(self.manager.statistics.sent_frames, 0)
+        self.assertEqual(len(errors), 1)
+        self.assertFalse(self.manager.is_cyclic_sending())
 
 
 if __name__ == "__main__":

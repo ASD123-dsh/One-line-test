@@ -1,0 +1,1538 @@
+{
+  "date": "2026-10-22",
+  "version": "1.58.5",
+  "record_stage": "palette source validation before user-authorized repackaging",
+  "subsequent_packaging_record": "dist/历史归档/本地修复包/v1.58.5-classic-20261022/packaging-verification.json",
+  "scope": "classic palette only; layout and business code preserved",
+  "local_only": true,
+  "compiled": false,
+  "published": false,
+  "git_writes": false,
+  "syntax_files": 102,
+  "tests_passed": 361,
+  "source_backup": {
+    "path": "D:\\work\\Self_Made_Program\\sifexe-Refactoring\\dist\\历史归档\\恢复经典配色前源码与说明-v1.58.5-20261022-完整.zip",
+    "files": 135,
+    "sha256": "7439e47d9e225d37c3adb4142e3fbdcf1313c61103c961a5ec6171379dac3639"
+  },
+  "source_guard": {
+    "changed": [
+      "gui/soft_theme.py",
+      "img/ui/radio.svg",
+      "tests/test_classic_palette.py",
+      "tests/test_navy_palette.py"
+    ],
+    "unchanged_files": 106,
+    "hashes": {
+      "app_info.py": "697f39968423c90ad7344ca9a8a795fd197617db34b2c7b552793e73cdee9aa3",
+      "app_paths.py": "09e13f8ca01670e74aea9cb25f2b87d1c6bd14fc4ef2fab17fd307d12c867fef",
+      "app_settings.py": "26500b7e81a483f93edb79fa8379dadcb5a9072ef5f8eda0a34cdb3a5b9967c4",
+      "diagnostics.py": "a1f1c428be1fc22f4c4b7d62e226b84604395ccbe4a59a97a38edcc71d0a723b",
+      "gui/__init__.py": "c9cf4f0c26aae58a0503ba3067c442ea27035363be38337ad1cbcb8ab91fd18f",
+      "gui/activation_dialog.py": "d22af2c61ed6b1603b915f4500aa7186fdecef5732e5adc47a7651b6da93ee1b",
+      "gui/feedback_dialog.py": "f37509ddefd3a2f110d16ca004d6194b250d86f18c307a2e0f46393fa036650b",
+      "gui/frame_config_dialog.py": "4e3e623e0df13e3b57fd32c301172f157cd584ab711e13d30d22b35b0eae1c05",
+      "gui/frame_preview.py": "25e04c14c5e4b8b315a115611f4ddf2d33a0cfd80499dc02d7b353ea9258ad8b",
+      "gui/main_window.py": "7bfb910a64dc7b5916659d69efb4a7078f74e0d674c5bb18cdf61ed183ab2ae1",
+      "gui/packet_sequence_dialog.py": "a189007a24d1507b5f29dd4f58231ade2f74619d6644667fb24a840881d8fcf7",
+      "gui/protocol_pages/__init__.py": "cc016c39c8403569fc86a34b01e51104b9eeaab56724f3a0b28e2a520a224b50",
+      "gui/protocol_pages/battery.py": "96587bdf624989296f1aa715992164bf64d5364d654a38fd58e42b83392b83f3",
+      "gui/protocol_pages/common_bindings.py": "574e23fccd76fc3765ff3d645e7204053c4bd254fbf59952e792dce9caa30e59",
+      "gui/protocol_pages/common_forms.py": "b49672a90b12b71ec26f4d9a655d9ee76e816d4c81439904f3a266ded68f2801",
+      "gui/protocol_pages/lishen.py": "641c0fb9c4a9439fff1b0f63d18bfe54438fbb276e36d6441fabacde24db21bb",
+      "gui/protocol_pages/lithium.py": "edfa86413be11177a55262fde1331a500e5b68ea8fa4973509ec84a598cede6a",
+      "gui/protocol_pages/luyuan.py": "256338a9468dc1228173af996bda8ba9b1fc320f3408bcfde65d461d750290c8",
+      "gui/protocol_pages/xinchi.py": "78b74f490ace6fee4f51efa9d36a7f901b9742e46159f670fb1db96c972b94c1",
+      "gui/protocol_pages/xinri.py": "8f17c6542f7fe7147e58a92727421753df72b3ae4ceeed6672faaf19279efd57",
+      "gui/protocol_pages/xinsiwei.py": "e3c187fc232374afe48a5801568f5005198c19c1843441208ec4a3db8058963b",
+      "gui/protocol_selector.py": "7873aef41ada1e3c7c91a8fa5cef34d4437a27c4eeb52d64d5c988fa96bd4d08",
+      "gui/protocol_tabs.py": "2c26eb4e9254ac7b112e9c2fc2db92af68b899272ff2148d99d2829ad7a2f994",
+      "gui/protocol_ui_registry.py": "2e767f168948f3d291cb1659eed7374b9d9df2dfe46da0d4c98282d78aa0e31a",
+      "gui/send_history.py": "4e1efe14f19929a81b737dca44643f2e683cf312676123bc070fb2feb911f2ed",
+      "gui/settings_panel.py": "1e2cebed393ab5522a078d57717ae1940a0292972216a5f778de4655d2a10c5a",
+      "gui/soft_theme.py": "db29516fcfa4728ade7d41091705a96f500c05f01aaab8fb94990319e43ade06",
+      "gui/ui_icons.py": "2df47e0d7ac4787843e9fc80cec73244197a864468adea4fef03e18b23e73b0e",
+      "gui/update_dialog.py": "f338bc134cd2940c46c5e661d0b2430166fd6c850b01231703862ed27c546613",
+      "img/ui/check.svg": "581a10d85b788e17b8bab3b9c3dee9ff110cc9c2b214ddb2cfee96158cfbeec8",
+      "img/ui/chevron-down.svg": "e7b8e3e517bbf42982afbddfbbda0d499b512a4e753433d4890028825acd504c",
+      "img/ui/chevron-up.svg": "4148bf0916b58ab6c12c00f858f658c2c53c2578859e890f72f705878fa8973c",
+      "img/ui/radio.svg": "d143ed01941b665badb70bb4206ac590c9de1fe67856818f8687cd5d2b333aee",
+      "img/图标.ico": "aeafd081f0efa6a447a4479b8c0d7338f3fcc9dc34a8f9d2aa5a543e6f83a186",
+      "img/联系我.jpg": "37be67fd77e19021db62d1bcf8285ec517f111969a522cf53a8121879187322f",
+      "licensing/__init__.py": "29ca7e723dc6527ca6bd223cc69c09fd76e6557dc4eb7086f014dddf8fd33723",
+      "licensing/activation.py": "4ee3156703efc2aae72d31409c42a29939c2ad8e3d7d3d28cbe259f988a2aba1",
+      "main.py": "93f5b6c8b87f185172aae1218257e146b383c448b9abff8ebf204766dc6040b5",
+      "protocol/__init__.py": "3ea46023b9c713e2c17801fa9a7e4cc47204446ac4385013b2b9fd6bb873d98c",
+      "protocol/codecs/__init__.py": "25180f1e947d7114d44388135af6932d8ce9263cd185e7adbbb7a81fbe9428aa",
+      "protocol/codecs/battery.py": "aebfdcda38122c4fe91693daf6691424c52b02331d4763c0e0de4bc5faca8cf8",
+      "protocol/codecs/dongwei.py": "7138de6f47cb73907fb25486887e69d68c9331ea9a7e90876f0af8aab98b1d7d",
+      "protocol/codecs/fz_sif.py": "57fbe7d093a510cb8f488150869d5b2bede357615cb0cc4766f6d20316900d3e",
+      "protocol/codecs/hangzhou.py": "d4503fc8259c4dad8e712982f7a071e25e15671cf5de84bd5348995ef6f230d5",
+      "protocol/codecs/jingxian.py": "ff3ef9f68ac993901f6a87681d855b3d47cb3b509ef934f78e8abc55e9d7efe9",
+      "protocol/codecs/lishen.py": "95906f3df6fb4a2dee08fc26b64a3836561335e6f390e653fee613c5b3c3956c",
+      "protocol/codecs/lithium.py": "f8e022e854a5a325220d927fb0635173bcaed275a8b4ad58bd4c72fa4c0a314a",
+      "protocol/codecs/luyuan.py": "6e6efee4f3a3c3f217e1468f0572e87a46d7e42c20144cadc78fc14f429164bd",
+      "protocol/codecs/ruilun.py": "c5827aa791ad9e34a9081362dfdbbe4acef3492c022ca9a9cb708a751906c1cc",
+      "protocol/codecs/shenzhouxing.py": "f759b7c1ddc1cf3036cd68068edead2254ffff31403c478bf2ea79e1ee537c37",
+      "protocol/codecs/sxsy.py": "2f932e846361c424b5e452b6dcae0f7a15bb711c75ec23ebfb65d2ca8262b86e",
+      "protocol/codecs/tailing.py": "f33444dbd83467ea6d358058090c8b550886e1c713a020f8b5bbe36c4c8e1b51",
+      "protocol/codecs/xinchi.py": "8cf098341bab3af8503429cde47fc612c1651dd93a459e84a32007151bfab4f0",
+      "protocol/codecs/xinri.py": "a98c83603755fd71d084d6080934da1bf80368ee93db3a31a160a2dd2eaef2bb",
+      "protocol/codecs/xinsiwei.py": "3e430481595b58c4f78bdecece6d63d83708e2484738df7024ecccae9cfa4db0",
+      "protocol/codecs/yadea.py": "b0a0ad0775ea64aebd4505076ed6e433ea9009653a3c607f6cccb9a677c2e140",
+      "protocol/codecs/yige.py": "28f2a2b515879624afd85c66392d55149ee1fec1dec12483adad43abcd747a68",
+      "protocol/codecs/youyibao.py": "cb0887b6355857c94bd9cc597af5bc59bd0c023422567af5e38adc90e15f089a",
+      "protocol/constants.py": "8f11ea2d58f18aa5d5cb810c80107ba50d4def89594868311ed8bab04c50256a",
+      "protocol/definitions.py": "bfa693874daf55e6f1ea29b129daab5ac217b4d219372dbf4d360f4106cd301b",
+      "protocol/descriptions.py": "2febe5117da0500e5e0436fc1fbee07d32488840e01953074bb91af26970b53c",
+      "protocol/frame_utils.py": "e5b6099dd4c7e90716148637ff4e25a5b933c94f5f83f1db1866e33ae47d43e7",
+      "protocol/models.py": "c57d4c0b61b6789aec734578982dabb1ee584184dba110db59e1d77f28984cc1",
+      "protocol/presets.py": "b08d7ef5f5aae8cd10d47dfcce7335bce3f56bc654ddc8251d9766b0647bf944",
+      "protocol/protocol_handler.py": "378d906a6157a65b0e2a5cbd167ef64192185f8942346cfb82b034dab8415d17",
+      "protocol/validation.py": "629bc122579c40c75a80c8b81febbb4e582fa5db58c19a625b2d5d5330c98efd",
+      "serial_comm/__init__.py": "8fbd87b1efb0245b331efb674ff9f85bc56fbaa238ccce454c8db7200b9030d4",
+      "serial_comm/send_worker.py": "25daa3e9b871c07f0707d0bab37ecb80ddf7b28828864a0147c143912a65b420",
+      "serial_comm/serial_manager.py": "f70c66ff8b671566fe69ff0ca2ee1b909cde5e6da19ce5a9e45a933d32cca399",
+      "serial_comm/timing.py": "8771986e6be7e56cbe29fa52fe5f591d33f00f8f3cd13b8df657f507e5d9cf4c",
+      "tests/test_activation.py": "0b77ef3772ad14e1ec758dc272b912ba2b77089b65ceae127c40f681c2a109d0",
+      "tests/test_app_paths.py": "a4f09c8e8e5c1f507d054b72f6bbeb0de83d2794ae6c8c6e5e4b04ddf108f40c",
+      "tests/test_archive_release.py": "77494b43e851c73eaca53fed0a52af67f4a041efd50203e77299271ee1f6e117",
+      "tests/test_background_serial.py": "e6f2704eb8bef5e9811d5a2ebe3c40236bcb22564c57cb9f139c6399cbf64d8d",
+      "tests/test_classic_palette.py": "93de29d1f4accdb61cbc1c2688bb94e85520ce54aa9cdcbb9c8f5fe23f8caa6f",
+      "tests/test_frame_config_dialog.py": "767dc884115a28fa37f3b443888377135b5a4e721816f7e97a2d7e99169fc69a",
+      "tests/test_frame_utils.py": "d219fb7844a1dd1d5820df7ce447a0bea98ec74ba1bd42cdcbcae9b2399acdfa",
+      "tests/test_lishen_protocol.py": "d8d4c393dcdb5707fc85f688afc86d8ff1e7aec068d608c6224481252f4f4260",
+      "tests/test_local_update_test.py": "b958b5ea49e8e58aad15b9ccee62f895563df63ef9e59a519285d69b17272a54",
+      "tests/test_main_window.py": "9d95f647372b7964d5b756ae58f4661be7557d1e2a735253f64a20e79df31bf5",
+      "tests/test_managed_update.py": "5b69c1161ec248318e5b50d7879186dda659354f4d821c2084d67c3041262ffd",
+      "tests/test_packet_sequence_dialog.py": "ca2b1c7e79a43fa064207485dce04ef7ba9df263d131791a32061ff6d3b26eae",
+      "tests/test_protocol_components.py": "314935882da594c8737058663a9878b38ca15e373b0897d4c4fcfc0f0a558874",
+      "tests/test_protocol_handler.py": "66f62dc01fe8b295948832bec385472a01a8606954a91a300d3b994f63bcff53",
+      "tests/test_protocol_ui_registry.py": "56da30d5d322abec0afc2a1e45d8ba8bdf4f34b279945d9a74556553c003e2c5",
+      "tests/test_reference_ui.py": "955811e6de4e20d3a06e56341512d1687df5e21a93da3886173c4695c3fb24da",
+      "tests/test_serial_manager.py": "b89c39a4ded9cad45ae80c453b2194ebe9e40a715f71e7a92d41f7366569de00",
+      "tests/test_settings_diagnostics.py": "466dd7360993bbd9e9afd3718aa2ff46b7b0f27e897446213d684ff163bbd97b",
+      "tests/test_soft_ui.py": "1bde94cbdd22598fdf60c073ddb28fffa2dfbeec918b42b6a954710efa5f07bc",
+      "tests/test_update_dialog.py": "2b1e16df531bf067dcdf7e754778cd3c0dd550001cdd9ca009bfcb6731af477e",
+      "tests/test_update_recovery.py": "ada73341a9f0ba21708714e4af602ca173f75e12c241b1ec43685158068c198c",
+      "tests/test_update_startup.py": "8c4e41e038018403afbf7b47894a1dd886cf3c3d7fd7ac9f510c207d6cceecfb",
+      "tests/test_updates.py": "43284e81517946fdb354146df1e7cb5f467e8e162c4cbcddfa8cf0fe3b0d6479",
+      "tools/activation_code.txt": "155292f3570270b29b937295736264868a98316b9a903192f86f4b4c5f97711d",
+      "tools/activation_tool.py": "2a13bbaf257cb294b9e1c52bf5beb89f1ff6be222d4198bd6b44e855081ceb56",
+      "tools/archive_release.py": "ba0997cc3efcf1e51dbd9a1e81e20dc0f245b2b46bc27d2ab23c34a440107262",
+      "tools/build_release.py": "8db8dfc7f732c1a8cfcd2ea8eb2bcb47a0c645d8c0aeb89e0f6d14051f8f9be7",
+      "tools/check_project.py": "1186e5d0231ad6db7de74801f5ed080686c6b9ae91e89fd15ed06e9286bb09c3",
+      "tools/generate_activation_code.py": "dcebd284da9e701845d93e4d69b89e95f02dc9378375fdb0d016c9b6fc460562",
+      "tools/local_update_test.py": "b9be69864312f721d89c366aebae9a84bff145a99a61064600214e058baef8c3",
+      "tools/update_installer.py": "00a1c117c1db8a0e6c61b81a246df6c7682588f9ab2a53df48c1a64fb4a0e55b",
+      "updating/__init__.py": "82816e4ef1cbb95eaad94bb7add3f20b4ac522905a5096109e069bc17992c81a",
+      "updating/controller.py": "c11d1b5f9d18cd90590a83b3a53cae72ce00f45b16ef3552ca76cdbe0b5b10e7",
+      "updating/file_transaction.py": "4c4a3e1e8fdd1ec3aa2cae3c6a81eac6a7609bd94209ce33cc3a0fe9eb5b46ff",
+      "updating/installer.py": "f3010ecf1a104ad3a204281aff80faa18e4ef30960681145df880476f94df935",
+      "updating/package.py": "2a2ba7966be36072d1d1ae61a2d38bd4a1ba97b59ce5afd08b08377e5e00ead2",
+      "updating/recovery.py": "7bce026248b1c14f55997c746b308fe813d2cf5ac203f42014270bae322b0e12",
+      "updating/releases.py": "ccd96de3d1e4b125f492a9f9743e468db6192bde321aa2fe32a8be2e83da9b4a",
+      "updating/startup.py": "4aed536145ce99055672eee478327233a3b3236623f10360c9f064868a37759e"
+    }
+  },
+  "geometry_identical": true,
+  "geometry_scenarios": {
+    "compact-1": {
+      "window_size": [
+        1000,
+        640
+      ],
+      "main_splitter": [
+        481,
+        481
+      ],
+      "monitor_splitter": [
+        393,
+        160
+      ],
+      "control_scroll_max": 110,
+      "geometry": {
+        "port_combo": [
+          131,
+          75,
+          246,
+          28,
+          false
+        ],
+        "baud_combo": [
+          131,
+          110,
+          246,
+          28,
+          false
+        ],
+        "tosc_spin": [
+          131,
+          145,
+          246,
+          28,
+          false
+        ],
+        "refresh_ports_btn": [
+          385,
+          76,
+          88,
+          26,
+          false
+        ],
+        "connect_btn": [
+          27,
+          180,
+          350,
+          32,
+          false
+        ],
+        "connection_status": [
+          385,
+          180,
+          88,
+          32,
+          false
+        ],
+        "protocol_combo": [
+          131,
+          264,
+          342,
+          28,
+          false
+        ],
+        "normal_radio": [
+          27,
+          300,
+          79,
+          19,
+          false
+        ],
+        "recovery_radio": [
+          114,
+          300,
+          78,
+          19,
+          false
+        ],
+        "fault_radio": [
+          200,
+          300,
+          79,
+          19,
+          false
+        ],
+        "custom_radio": [
+          287,
+          300,
+          89,
+          19,
+          false
+        ],
+        "frame_custom_radio": [
+          384,
+          300,
+          89,
+          19,
+          false
+        ],
+        "frame_config_btn": [
+          175,
+          327,
+          150,
+          26,
+          false
+        ],
+        "status_tabs": [
+          27,
+          405,
+          446,
+          130,
+          false
+        ],
+        "parameter_mode_label": [
+          376,
+          409,
+          97,
+          28,
+          false
+        ],
+        "interval_spin": [
+          112,
+          587,
+          175,
+          28,
+          false
+        ],
+        "single_send_btn": [
+          27,
+          622,
+          219,
+          26,
+          false
+        ],
+        "cyclic_send_btn": [
+          254,
+          622,
+          219,
+          26,
+          false
+        ],
+        "packet_sequence_btn": [
+          27,
+          655,
+          219,
+          26,
+          false
+        ],
+        "packet_sequence_send_btn": [
+          254,
+          655,
+          219,
+          26,
+          false
+        ],
+        "send_statistics_label": [
+          27,
+          688,
+          446,
+          18,
+          false
+        ],
+        "clear_history_btn": [
+          518,
+          478,
+          98,
+          26,
+          false
+        ],
+        "auto_scroll_cb": [
+          623,
+          481,
+          76,
+          19,
+          false
+        ],
+        "history_view": [
+          518,
+          511,
+          455,
+          85,
+          false
+        ],
+        "history_text": [
+          505,
+          44,
+          640,
+          480,
+          true
+        ],
+        "preview.table": [
+          518,
+          153,
+          455,
+          273,
+          false
+        ],
+        "preview.hex_text": [
+          518,
+          108,
+          455,
+          38,
+          false
+        ],
+        "preview.copy_button": [
+          875,
+          75,
+          98,
+          26,
+          false
+        ]
+      },
+      "frame_rows": 12,
+      "frame_columns": [
+        80,
+        182,
+        182,
+        0
+      ],
+      "history_columns": [
+        110,
+        70,
+        273
+      ]
+    },
+    "custom-1": {
+      "window_size": [
+        1200,
+        800
+      ],
+      "main_splitter": [
+        581,
+        581
+      ],
+      "monitor_splitter": [
+        470,
+        243
+      ],
+      "control_scroll_max": 0,
+      "geometry": {
+        "port_combo": [
+          131,
+          75,
+          355,
+          28,
+          false
+        ],
+        "baud_combo": [
+          131,
+          110,
+          355,
+          28,
+          false
+        ],
+        "tosc_spin": [
+          131,
+          145,
+          355,
+          28,
+          false
+        ],
+        "refresh_ports_btn": [
+          494,
+          76,
+          88,
+          26,
+          false
+        ],
+        "connect_btn": [
+          27,
+          180,
+          459,
+          32,
+          false
+        ],
+        "connection_status": [
+          494,
+          180,
+          88,
+          32,
+          false
+        ],
+        "protocol_combo": [
+          131,
+          264,
+          451,
+          28,
+          false
+        ],
+        "normal_radio": [
+          27,
+          300,
+          105,
+          19,
+          false
+        ],
+        "recovery_radio": [
+          140,
+          300,
+          104,
+          19,
+          false
+        ],
+        "fault_radio": [
+          252,
+          300,
+          105,
+          19,
+          false
+        ],
+        "custom_radio": [
+          365,
+          300,
+          104,
+          19,
+          false
+        ],
+        "frame_custom_radio": [
+          477,
+          300,
+          105,
+          19,
+          false
+        ],
+        "frame_config_btn": [
+          230,
+          327,
+          150,
+          26,
+          false
+        ],
+        "status_tabs": [
+          27,
+          405,
+          555,
+          180,
+          false
+        ],
+        "parameter_mode_label": [
+          498,
+          409,
+          84,
+          28,
+          false
+        ],
+        "interval_spin": [
+          112,
+          637,
+          175,
+          28,
+          false
+        ],
+        "single_send_btn": [
+          27,
+          672,
+          274,
+          26,
+          false
+        ],
+        "cyclic_send_btn": [
+          309,
+          672,
+          273,
+          26,
+          false
+        ],
+        "packet_sequence_btn": [
+          27,
+          705,
+          274,
+          26,
+          false
+        ],
+        "packet_sequence_send_btn": [
+          309,
+          705,
+          273,
+          26,
+          false
+        ],
+        "send_statistics_label": [
+          27,
+          738,
+          555,
+          18,
+          false
+        ],
+        "clear_history_btn": [
+          618,
+          555,
+          98,
+          26,
+          false
+        ],
+        "auto_scroll_cb": [
+          723,
+          558,
+          76,
+          19,
+          false
+        ],
+        "history_view": [
+          618,
+          588,
+          555,
+          168,
+          false
+        ],
+        "history_text": [
+          605,
+          44,
+          640,
+          480,
+          true
+        ],
+        "preview.table": [
+          618,
+          153,
+          555,
+          325,
+          false
+        ],
+        "preview.hex_text": [
+          618,
+          108,
+          555,
+          38,
+          false
+        ],
+        "preview.copy_button": [
+          1075,
+          75,
+          98,
+          26,
+          false
+        ]
+      },
+      "frame_rows": 12,
+      "frame_columns": [
+        80,
+        237,
+        236,
+        0
+      ],
+      "history_columns": [
+        110,
+        70,
+        373
+      ]
+    },
+    "lishen-1": {
+      "window_size": [
+        1200,
+        800
+      ],
+      "main_splitter": [
+        581,
+        581
+      ],
+      "monitor_splitter": [
+        370,
+        343
+      ],
+      "control_scroll_max": 0,
+      "geometry": {
+        "port_combo": [
+          131,
+          75,
+          355,
+          28,
+          false
+        ],
+        "baud_combo": [
+          131,
+          110,
+          355,
+          28,
+          false
+        ],
+        "tosc_spin": [
+          131,
+          145,
+          355,
+          28,
+          false
+        ],
+        "refresh_ports_btn": [
+          494,
+          76,
+          88,
+          26,
+          false
+        ],
+        "connect_btn": [
+          27,
+          180,
+          459,
+          32,
+          false
+        ],
+        "connection_status": [
+          494,
+          180,
+          88,
+          32,
+          false
+        ],
+        "protocol_combo": [
+          131,
+          264,
+          451,
+          28,
+          false
+        ],
+        "normal_radio": [
+          27,
+          300,
+          105,
+          19,
+          false
+        ],
+        "recovery_radio": [
+          140,
+          300,
+          104,
+          19,
+          false
+        ],
+        "fault_radio": [
+          252,
+          300,
+          105,
+          19,
+          false
+        ],
+        "custom_radio": [
+          365,
+          300,
+          104,
+          19,
+          false
+        ],
+        "frame_custom_radio": [
+          477,
+          300,
+          105,
+          19,
+          false
+        ],
+        "frame_config_btn": [
+          230,
+          327,
+          150,
+          26,
+          false
+        ],
+        "status_tabs": [
+          27,
+          405,
+          555,
+          180,
+          false
+        ],
+        "parameter_mode_label": [
+          498,
+          409,
+          84,
+          28,
+          false
+        ],
+        "interval_spin": [
+          112,
+          637,
+          175,
+          28,
+          false
+        ],
+        "single_send_btn": [
+          27,
+          672,
+          274,
+          26,
+          false
+        ],
+        "cyclic_send_btn": [
+          309,
+          672,
+          273,
+          26,
+          false
+        ],
+        "packet_sequence_btn": [
+          27,
+          705,
+          274,
+          26,
+          false
+        ],
+        "packet_sequence_send_btn": [
+          309,
+          705,
+          273,
+          26,
+          false
+        ],
+        "send_statistics_label": [
+          27,
+          738,
+          555,
+          18,
+          false
+        ],
+        "clear_history_btn": [
+          618,
+          455,
+          98,
+          26,
+          false
+        ],
+        "auto_scroll_cb": [
+          723,
+          458,
+          76,
+          19,
+          false
+        ],
+        "history_view": [
+          618,
+          488,
+          555,
+          268,
+          false
+        ],
+        "history_text": [
+          605,
+          44,
+          640,
+          480,
+          true
+        ],
+        "preview.table": [
+          618,
+          153,
+          555,
+          225,
+          false
+        ],
+        "preview.hex_text": [
+          618,
+          108,
+          555,
+          38,
+          false
+        ],
+        "preview.copy_button": [
+          1075,
+          75,
+          98,
+          26,
+          false
+        ],
+        "lishen_soc_spin": [
+          37,
+          473,
+          166,
+          28,
+          false
+        ],
+        "lishen_total_voltage_spin": [
+          221,
+          473,
+          167,
+          28,
+          false
+        ],
+        "lishen_temperature_spin": [
+          406,
+          473,
+          166,
+          28,
+          false
+        ]
+      },
+      "frame_rows": 6,
+      "frame_columns": [
+        60,
+        165,
+        164,
+        164
+      ],
+      "history_columns": [
+        110,
+        70,
+        373
+      ]
+    },
+    "overview-1.25": {
+      "window_size": [
+        1200,
+        800
+      ],
+      "main_splitter": [
+        581,
+        581
+      ],
+      "monitor_splitter": [
+        445,
+        268
+      ],
+      "control_scroll_max": 0,
+      "geometry": {
+        "port_combo": [
+          131,
+          75,
+          355,
+          28,
+          false
+        ],
+        "baud_combo": [
+          131,
+          110,
+          355,
+          28,
+          false
+        ],
+        "tosc_spin": [
+          131,
+          145,
+          355,
+          28,
+          false
+        ],
+        "refresh_ports_btn": [
+          494,
+          76,
+          88,
+          26,
+          false
+        ],
+        "connect_btn": [
+          27,
+          180,
+          459,
+          32,
+          false
+        ],
+        "connection_status": [
+          494,
+          180,
+          88,
+          32,
+          false
+        ],
+        "protocol_combo": [
+          131,
+          264,
+          451,
+          28,
+          false
+        ],
+        "normal_radio": [
+          27,
+          300,
+          105,
+          19,
+          false
+        ],
+        "recovery_radio": [
+          140,
+          300,
+          104,
+          19,
+          false
+        ],
+        "fault_radio": [
+          252,
+          300,
+          105,
+          19,
+          false
+        ],
+        "custom_radio": [
+          365,
+          300,
+          104,
+          19,
+          false
+        ],
+        "frame_custom_radio": [
+          477,
+          300,
+          105,
+          19,
+          false
+        ],
+        "frame_config_btn": [
+          230,
+          327,
+          150,
+          26,
+          false
+        ],
+        "status_tabs": [
+          27,
+          405,
+          555,
+          180,
+          false
+        ],
+        "parameter_mode_label": [
+          485,
+          409,
+          97,
+          28,
+          false
+        ],
+        "interval_spin": [
+          112,
+          637,
+          175,
+          28,
+          false
+        ],
+        "single_send_btn": [
+          27,
+          672,
+          274,
+          26,
+          false
+        ],
+        "cyclic_send_btn": [
+          309,
+          672,
+          273,
+          26,
+          false
+        ],
+        "packet_sequence_btn": [
+          27,
+          705,
+          274,
+          26,
+          false
+        ],
+        "packet_sequence_send_btn": [
+          309,
+          705,
+          273,
+          26,
+          false
+        ],
+        "send_statistics_label": [
+          27,
+          738,
+          555,
+          18,
+          false
+        ],
+        "clear_history_btn": [
+          618,
+          530,
+          98,
+          26,
+          false
+        ],
+        "auto_scroll_cb": [
+          723,
+          533,
+          76,
+          19,
+          false
+        ],
+        "history_view": [
+          618,
+          563,
+          555,
+          193,
+          false
+        ],
+        "history_text": [
+          605,
+          44,
+          640,
+          480,
+          true
+        ],
+        "preview.table": [
+          618,
+          153,
+          555,
+          325,
+          false
+        ],
+        "preview.hex_text": [
+          618,
+          108,
+          555,
+          38,
+          false
+        ],
+        "preview.copy_button": [
+          1075,
+          75,
+          98,
+          26,
+          false
+        ]
+      },
+      "frame_rows": 12,
+      "frame_columns": [
+        80,
+        237,
+        236,
+        0
+      ],
+      "history_columns": [
+        110,
+        70,
+        373
+      ]
+    },
+    "overview-1.5": {
+      "window_size": [
+        1200,
+        800
+      ],
+      "main_splitter": [
+        581,
+        581
+      ],
+      "monitor_splitter": [
+        445,
+        268
+      ],
+      "control_scroll_max": 0,
+      "geometry": {
+        "port_combo": [
+          131,
+          75,
+          355,
+          28,
+          false
+        ],
+        "baud_combo": [
+          131,
+          110,
+          355,
+          28,
+          false
+        ],
+        "tosc_spin": [
+          131,
+          145,
+          355,
+          28,
+          false
+        ],
+        "refresh_ports_btn": [
+          494,
+          76,
+          88,
+          26,
+          false
+        ],
+        "connect_btn": [
+          27,
+          180,
+          459,
+          32,
+          false
+        ],
+        "connection_status": [
+          494,
+          180,
+          88,
+          32,
+          false
+        ],
+        "protocol_combo": [
+          131,
+          264,
+          451,
+          28,
+          false
+        ],
+        "normal_radio": [
+          27,
+          300,
+          105,
+          19,
+          false
+        ],
+        "recovery_radio": [
+          140,
+          300,
+          104,
+          19,
+          false
+        ],
+        "fault_radio": [
+          252,
+          300,
+          105,
+          19,
+          false
+        ],
+        "custom_radio": [
+          365,
+          300,
+          104,
+          19,
+          false
+        ],
+        "frame_custom_radio": [
+          477,
+          300,
+          105,
+          19,
+          false
+        ],
+        "frame_config_btn": [
+          230,
+          327,
+          150,
+          26,
+          false
+        ],
+        "status_tabs": [
+          27,
+          405,
+          555,
+          180,
+          false
+        ],
+        "parameter_mode_label": [
+          485,
+          409,
+          97,
+          28,
+          false
+        ],
+        "interval_spin": [
+          112,
+          637,
+          175,
+          28,
+          false
+        ],
+        "single_send_btn": [
+          27,
+          672,
+          274,
+          26,
+          false
+        ],
+        "cyclic_send_btn": [
+          309,
+          672,
+          273,
+          26,
+          false
+        ],
+        "packet_sequence_btn": [
+          27,
+          705,
+          274,
+          26,
+          false
+        ],
+        "packet_sequence_send_btn": [
+          309,
+          705,
+          273,
+          26,
+          false
+        ],
+        "send_statistics_label": [
+          27,
+          738,
+          555,
+          18,
+          false
+        ],
+        "clear_history_btn": [
+          618,
+          530,
+          98,
+          26,
+          false
+        ],
+        "auto_scroll_cb": [
+          723,
+          533,
+          76,
+          19,
+          false
+        ],
+        "history_view": [
+          618,
+          563,
+          555,
+          193,
+          false
+        ],
+        "history_text": [
+          605,
+          44,
+          640,
+          480,
+          true
+        ],
+        "preview.table": [
+          618,
+          153,
+          555,
+          325,
+          false
+        ],
+        "preview.hex_text": [
+          618,
+          108,
+          555,
+          38,
+          false
+        ],
+        "preview.copy_button": [
+          1075,
+          75,
+          98,
+          26,
+          false
+        ]
+      },
+      "frame_rows": 12,
+      "frame_columns": [
+        80,
+        237,
+        236,
+        0
+      ],
+      "history_columns": [
+        110,
+        70,
+        373
+      ]
+    },
+    "overview-1": {
+      "window_size": [
+        1200,
+        800
+      ],
+      "main_splitter": [
+        581,
+        581
+      ],
+      "monitor_splitter": [
+        445,
+        268
+      ],
+      "control_scroll_max": 0,
+      "geometry": {
+        "port_combo": [
+          131,
+          75,
+          355,
+          28,
+          false
+        ],
+        "baud_combo": [
+          131,
+          110,
+          355,
+          28,
+          false
+        ],
+        "tosc_spin": [
+          131,
+          145,
+          355,
+          28,
+          false
+        ],
+        "refresh_ports_btn": [
+          494,
+          76,
+          88,
+          26,
+          false
+        ],
+        "connect_btn": [
+          27,
+          180,
+          459,
+          32,
+          false
+        ],
+        "connection_status": [
+          494,
+          180,
+          88,
+          32,
+          false
+        ],
+        "protocol_combo": [
+          131,
+          264,
+          451,
+          28,
+          false
+        ],
+        "normal_radio": [
+          27,
+          300,
+          105,
+          19,
+          false
+        ],
+        "recovery_radio": [
+          140,
+          300,
+          104,
+          19,
+          false
+        ],
+        "fault_radio": [
+          252,
+          300,
+          105,
+          19,
+          false
+        ],
+        "custom_radio": [
+          365,
+          300,
+          104,
+          19,
+          false
+        ],
+        "frame_custom_radio": [
+          477,
+          300,
+          105,
+          19,
+          false
+        ],
+        "frame_config_btn": [
+          230,
+          327,
+          150,
+          26,
+          false
+        ],
+        "status_tabs": [
+          27,
+          405,
+          555,
+          180,
+          false
+        ],
+        "parameter_mode_label": [
+          485,
+          409,
+          97,
+          28,
+          false
+        ],
+        "interval_spin": [
+          112,
+          637,
+          175,
+          28,
+          false
+        ],
+        "single_send_btn": [
+          27,
+          672,
+          274,
+          26,
+          false
+        ],
+        "cyclic_send_btn": [
+          309,
+          672,
+          273,
+          26,
+          false
+        ],
+        "packet_sequence_btn": [
+          27,
+          705,
+          274,
+          26,
+          false
+        ],
+        "packet_sequence_send_btn": [
+          309,
+          705,
+          273,
+          26,
+          false
+        ],
+        "send_statistics_label": [
+          27,
+          738,
+          555,
+          18,
+          false
+        ],
+        "clear_history_btn": [
+          618,
+          530,
+          98,
+          26,
+          false
+        ],
+        "auto_scroll_cb": [
+          723,
+          533,
+          76,
+          19,
+          false
+        ],
+        "history_view": [
+          618,
+          563,
+          555,
+          193,
+          false
+        ],
+        "history_text": [
+          605,
+          44,
+          640,
+          480,
+          true
+        ],
+        "preview.table": [
+          618,
+          153,
+          555,
+          325,
+          false
+        ],
+        "preview.hex_text": [
+          618,
+          108,
+          555,
+          38,
+          false
+        ],
+        "preview.copy_button": [
+          1075,
+          75,
+          98,
+          26,
+          false
+        ]
+      },
+      "frame_rows": 12,
+      "frame_columns": [
+        80,
+        237,
+        236,
+        0
+      ],
+      "history_columns": [
+        110,
+        70,
+        373
+      ]
+    }
+  },
+  "screenshots": [
+    {
+      "path": "C:\\Users\\hello\\.codex\\visualizations\\2026\\07\\23\\019f8dec-2031-76f1-aec9-a41a421d30fd\\one-line-ui-classic-v1.58.5-20261022\\01-经典配色-未连接.png",
+      "sha256": "1d20d1c19ab1db79d13f2ae970095d6d2dece6d724920fde1ffd72054b60834a"
+    },
+    {
+      "path": "C:\\Users\\hello\\.codex\\visualizations\\2026\\07\\23\\019f8dec-2031-76f1-aec9-a41a421d30fd\\one-line-ui-classic-v1.58.5-20261022\\02-经典配色-瑞轮循环.png",
+      "sha256": "6724d490f4ac9cef009bfa166d62576f10f72cb4cfce2aa1908e5a01d4ea1b0a"
+    },
+    {
+      "path": "C:\\Users\\hello\\.codex\\visualizations\\2026\\07\\23\\019f8dec-2031-76f1-aec9-a41a421d30fd\\one-line-ui-classic-v1.58.5-20261022\\03-经典配色-锂神循环.png",
+      "sha256": "dbd105408dc0b63accaae08f3740cfdcc32cc78d66765010214344dcce55c33d"
+    }
+  ],
+  "in_memory_serial": {
+    "ruilun_dynamic_frame": "08 61 01 00 00 00 00 00 00 B2 02 D8",
+    "lishen_dynamic_frame": "00 32 30 F6 00 58",
+    "cyclic_sending_continues": true
+  },
+  "real_serial_tested": false,
+  "full_upgrade_tested": false,
+  "unchanged_previous_exe": {
+    "palette": "navy",
+    "path": "dist/AD仪表一线通协议测试工具/AD仪表一线通协议测试工具.exe",
+    "sha256": "c7fddfd710260c4581f98f9b3a53f51290dbd88874b2c96a3f66d9d5e9906654"
+  }
+}

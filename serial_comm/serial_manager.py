@@ -617,7 +617,9 @@ class SerialManager(QObject):
 
         self.send_count += 1
         skip_ui = False
-        if self.send_interval_ms < 200:
+        # 修复后台历史每10帧才显示一次的问题；界面已有批量刷新，后台保留逐帧时间戳。
+        # 默认同步调用仍沿用原有 UI 限频契约，不改变显式 skip_ui_update 参数的含义。
+        if not self.background_send and self.send_interval_ms < 200:
             skip_ui = (self.send_count % self.ui_update_interval) != 0
 
         try:

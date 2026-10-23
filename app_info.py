@@ -4,7 +4,7 @@
 
 APP_NAME = "AD仪表一线通协议测试工具"
 APP_ID = "ad-meter-single-wire-tool"
-APP_VERSION = "1.58.4"
+APP_VERSION = "1.58.5"
 PROTOCOL_VERSION = "1.56"
 APP_EXE_NAME = APP_NAME + ".exe"
 GITHUB_REPOSITORY = "ASD123-dsh/One-line-test"

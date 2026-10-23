@@ -201,10 +201,9 @@ class LishenWindowTests(unittest.TestCase):
             window.protocol_combo.setCurrentText(PROTOCOL_LISHEN_BMS)
             window.show()
             _APP.processEvents()
-            scroll = window.status_tabs.parentWidget()
-            while scroll is not None and not isinstance(scroll, QScrollArea):
-                scroll = scroll.parentWidget()
-            self.assertIsNotNone(scroll)
+            # 界面改为每个参数页独立滚动，继续校验三项实际输入完整可见。
+            scroll = window.status_tabs.widget(window.status_tabs.currentIndex())
+            self.assertIsInstance(scroll, QScrollArea)
             viewport = scroll.viewport()
             for control in (window.lishen_soc_spin, window.lishen_total_voltage_spin, window.lishen_temperature_spin):
                 with self.subTest(control=control):

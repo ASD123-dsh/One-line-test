@@ -32,41 +32,47 @@ class LishenBmsPages:
     def create_lishen_bms_data_tab(self) -> QWidget:
         """按字节实际量程建立整数输入，不借用其他 BMS 的比例或温度编码。"""
         widget = QWidget()
+        widget.setProperty("formColumns", True)
         layout = QGridLayout(widget)
 
-        # 三项数据同排，避免默认窗口下温度输入被滚动区遮住。
+        # 对齐参考图：三列字段的名称置于输入框上方，量程和绑定保持原样。
         layout.addWidget(QLabel("SOC (%):"), 0, 0)
         self.lishen_soc_spin = QSpinBox()
         self.lishen_soc_spin.setRange(0, 100)
         self.lishen_soc_spin.setValue(self.current_status.soc_percent)
-        layout.addWidget(self.lishen_soc_spin, 0, 1)
+        layout.addWidget(self.lishen_soc_spin, 1, 0)
 
-        layout.addWidget(QLabel("总电压 (V):"), 0, 2)
+        layout.addWidget(QLabel("总电压 (V):"), 0, 1)
         self.lishen_total_voltage_spin = QSpinBox()
         self.lishen_total_voltage_spin.setRange(0, 255)
         self.lishen_total_voltage_spin.setValue(self.current_status.lishen_total_voltage_v)
         self.lishen_total_voltage_spin.setToolTip("1V/bit；0～255V 是字节编码量程，不代表电池额定范围")
-        layout.addWidget(self.lishen_total_voltage_spin, 0, 3)
+        layout.addWidget(self.lishen_total_voltage_spin, 1, 1)
 
-        layout.addWidget(QLabel("温度 (℃):"), 0, 4)
+        layout.addWidget(QLabel("电池温度 (℃):"), 0, 2)
         self.lishen_temperature_spin = QSpinBox()
         self.lishen_temperature_spin.setRange(-128, 127)
         self.lishen_temperature_spin.setValue(self.current_status.lishen_temperature_c)
         self.lishen_temperature_spin.setToolTip("1℃/bit，有符号8位补码；例如 -10℃ = 0xF6")
-        layout.addWidget(self.lishen_temperature_spin, 0, 5)
+        layout.addWidget(self.lishen_temperature_spin, 1, 2)
         for control in (self.lishen_soc_spin, self.lishen_total_voltage_spin, self.lishen_temperature_spin):
-            control.setFixedWidth(64)
+            control.setMinimumWidth(90)
+        for column in range(3):
+            layout.setColumnStretch(column, 1)
 
         self.lishen_protocol_note = QLabel(
-            "规格建议 1000～2000ms；测试允许 10～5000ms。"
+            "Byte1 / Byte5 固定 00 · 累加校验\n"
+            "规格建议 1000～2000ms；测试范围 10～5000ms。\n"
+            "本协议无回收或故障标志，预设仅提供测试数据。"
         )
+        self.lishen_protocol_note.setProperty("muted", True)
         self.lishen_protocol_note.setToolTip(
             "自动生成帧的 Byte1/Byte5 固定为 00；校验为前5字节累加和低8位。\n"
             "偏离规格建议周期仅供测试，单线时序仍由转码平台实现。\n"
             "本协议无回收/故障标志；对应预设仅改变三项测试数据。"
         )
         self.lishen_protocol_note.setWordWrap(True)
-        layout.addWidget(self.lishen_protocol_note, 1, 0, 1, 6)
+        layout.addWidget(self.lishen_protocol_note, 2, 0, 1, 3)
         return widget
 
     def load_lishen_bms_preset_scenario(self, scenario_id):

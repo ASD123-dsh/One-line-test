@@ -56,6 +56,12 @@ from licensing.activation import ActivationService
 from app_info import APP_NAME, APP_VERSION, PROTOCOL_VERSION
 from gui.update_dialog import UpdateDialog
 from gui.settings_panel import SettingsPanel
+from gui.frame_preview import FramePreview
+from gui.protocol_selector import ProtocolSelector
+from gui.protocol_tabs import ProtocolTabs
+from gui.soft_theme import PaletteCard, soft_glass_stylesheet, set_badge_tone, set_visual_property
+from gui.send_history import SendHistoryView
+from gui.ui_icons import GripSplitter, StatusBadge, button_icon, ui_icon
 from app_paths import user_data_directory
 from app_settings import SettingsStore
 from diagnostics import LOGGER
@@ -132,9 +138,10 @@ class MainWindow(
         self.refresh_recovery_notice()
 
     def init_ui(self):
-        """初始化用户界面"""
+        """建立柔和双栏工作区，仅调整呈现，不改变原有功能信号。"""
         self.setWindowTitle(f"{APP_NAME} V{APP_VERSION}")
         self.setGeometry(100, 100, 1200, 800)
+        self.setMinimumSize(1000, 640)
 
         # 创建中央部件
         central_widget = QWidget()
@@ -149,75 +156,59 @@ class MainWindow(
         main_layout.addWidget(title_bar)
 
         content_widget = QWidget()
+        content_widget.setObjectName("workspace")
         content_layout = QHBoxLayout(content_widget)
-        content_layout.setContentsMargins(10, 10, 10, 10)
+        content_layout.setContentsMargins(14, 10, 14, 10)
         content_layout.setSpacing(10)
 
         # 创建分割器
         splitter = QSplitter(Qt.Horizontal)
+        self.main_splitter = splitter
+        splitter.setChildrenCollapsible(False)
+        splitter.setHandleWidth(10)
         content_layout.addWidget(splitter)
         main_layout.addWidget(content_widget, 1)
 
         # 左侧控制面板
         left_panel = self.create_control_panel()
-        splitter.addWidget(left_panel)
+        self.control_panel = left_panel
+        self.control_scroll = QScrollArea()
+        self.control_scroll.setObjectName("controlPanelScroll")
+        self.control_scroll.setWidgetResizable(True)
+        self.control_scroll.setMinimumWidth(470)
+        self.control_scroll.setWidget(left_panel)
+        splitter.addWidget(self.control_scroll)
 
         # 右侧监控面板
         right_panel = self.create_monitor_panel()
         splitter.addWidget(right_panel)
 
         # 设置分割比例
-        splitter.setSizes([600, 600])
+        splitter.setSizes([570, 570])
 
         # 创建状态栏
         self.create_status_bar()
 
-        # 设置样式
-        self.setStyleSheet("""
-            QMainWindow {
-                background-color: #f0f0f0;
-            }
-            QFrame#windowActionBar {
-                background-color: #f8f8f8;
-                border-bottom: 1px solid #d9d9d9;
-            }
-            QLabel#windowActionTitle {
-                color: #4d4d4d;
-                font-size: 12px;
-                font-weight: bold;
-                padding-left: 4px;
-            }
-            QGroupBox {
-                font-weight: bold;
-                border: 2px solid #cccccc;
-                border-radius: 5px;
-                margin-top: 1ex;
-                padding-top: 10px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px 0 5px;
-            }
-            QPushButton {
-                background-color: #4CAF50;
-                border: none;
-                color: white;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-            QPushButton:pressed {
-                background-color: #3d8b40;
-            }
-            QPushButton:disabled {
-                background-color: #cccccc;
-                color: #666666;
-            }
-        """)
+        self.setStyleSheet(soft_glass_stylesheet())
+        self._fit_initial_screen()
+        self._schedule_preview_fit()
+
+    def _fit_initial_screen(self):
+        """高缩放或小屏幕时让窗口留在可用范围，参数通过滚动查看而不挤坏控件。"""
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            return
+        available = screen.availableGeometry()
+        if available.width() < self.minimumWidth() or available.height() < self.minimumHeight() + 30:
+            # 离屏验证或低于最低支持尺寸的显示器不缩到一个已知放不下的窗口。
+            return
+        if self.width() + 100 <= available.width() and self.height() + 140 <= available.height():
+            return
+        width = max(self.minimumWidth(), min(self.width(), available.width() - 32))
+        height = max(self.minimumHeight(), min(self.height(), available.height() - 40))
+        self.resize(width, height)
+        self.move(available.left() + max(0, (available.width() - width) // 2),
+                  available.top() + max(0, (available.height() - height - 30) // 2))
 
     def create_window_action_bar(self) -> QFrame:
         """创建右上角操作栏，使用一个菜单集中提供配置、诊断和帮助入口。"""
@@ -226,15 +217,18 @@ class MainWindow(
         bar.setFixedHeight(34)
 
         layout = QHBoxLayout(bar)
-        layout.setContentsMargins(10, 0, 0, 0)
-        layout.setSpacing(0)
+        layout.setContentsMargins(16, 0, 14, 0)
+        layout.setSpacing(10)
 
         title_label = QLabel("AD仪表一线通协议测试工具")
         title_label.setObjectName("windowActionTitle")
-        layout.addWidget(title_label)
+        # 系统标题栏已有工具名称，参考图内的操作栏只保留右侧菜单。
+        title_label.hide()
         layout.addStretch()
 
         self.tools_btn = self.create_tools_button()
+        self.tools_btn.setIcon(ui_icon("settings"))
+        self.tools_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.tools_btn.setCursor(Qt.PointingHandCursor)
         # 合并菜单后保留原控件引用名称，避免调用方因入口调整而失效。
         self.feedback_btn = self.tools_btn
@@ -268,9 +262,13 @@ class MainWindow(
         dialog.exec_()
 
     def create_control_panel(self) -> QWidget:
-        """创建左侧控制面板"""
+        """将可伸缩空间留给协议参数，连接和发送操作保持稳定位置。"""
         panel = QWidget()
+        panel.setObjectName("controlPanel")
+        panel.setMinimumWidth(470)
         layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
 
         # 串口配置区
         serial_group = self.create_serial_config_group()
@@ -282,27 +280,31 @@ class MainWindow(
 
         # Status位配置区
         status_group = self.create_status_config_group()
-        layout.addWidget(status_group)
+        layout.addWidget(status_group, 1)
 
         # 发送控制区
         send_group = self.create_send_control_group()
         layout.addWidget(send_group)
 
-        layout.addStretch()
         return panel
 
     def create_serial_config_group(self) -> QGroupBox:
         """创建串口配置组"""
-        group = QGroupBox("串口配置")
+        group = PaletteCard("串口配置")
+        group.setProperty("card", True)
         layout = QGridLayout(group)
+        layout.setContentsMargins(12, 12, 12, 10)
+        layout.setHorizontalSpacing(8)
+        layout.setVerticalSpacing(7)
 
         # 串口选择
         layout.addWidget(QLabel("串口:"), 0, 0)
         self.port_combo = QComboBox()
-        self.port_combo.setMinimumWidth(200)
+        self.port_combo.setMinimumWidth(170)
         layout.addWidget(self.port_combo, 0, 1)
 
         self.refresh_ports_btn = QPushButton("刷新")
+        self.refresh_ports_btn.setIcon(button_icon("refresh"))
         self.refresh_ports_btn.clicked.connect(self.refresh_ports)
         layout.addWidget(self.refresh_ports_btn, 0, 2)
 
@@ -323,20 +325,25 @@ class MainWindow(
 
         # 连接按钮
         self.connect_btn = QPushButton("连接")
+        self.connect_btn.setProperty("visualRole", "primary")
+        self.connect_btn.setObjectName("connectButton")
         self.connect_btn.clicked.connect(self.toggle_connection)
-        layout.addWidget(self.connect_btn, 3, 0, 1, 3)
+        layout.addWidget(self.connect_btn, 3, 0, 1, 2)
 
         # 连接状态指示
-        self.connection_status = QLabel("未连接")
-        self.connection_status.setStyleSheet("color: red; font-weight: bold;")
-        layout.addWidget(self.connection_status, 4, 0, 1, 3)
+        self.connection_status = StatusBadge("未连接", "connection")
+        set_badge_tone(self.connection_status, "muted")
+        layout.addWidget(self.connection_status, 3, 2)
+        layout.setColumnMinimumWidth(0, 96)
+        layout.setColumnMinimumWidth(2, 88)
+        layout.setColumnStretch(1, 1)
 
         return group
 
     def _compact_status_tab_pages(self):
         """统一收紧 Status 页签内部布局，避免选项间空白过大。"""
         for index in range(self.status_tabs.count()):
-            self._compact_status_layout_tree(self.status_tabs.widget(index), is_root=True)
+            self._compact_status_layout_tree(self.status_tabs.page_content(index), is_root=True)
 
     def _last_used_grid_row(self, layout: QGridLayout) -> int:
         """返回当前网格布局中实际使用到的最后一行。"""
@@ -373,7 +380,8 @@ class MainWindow(
                 layout.setHorizontalSpacing(12)
                 layout.setVerticalSpacing(6)
 
-            layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+            wide_fields = bool(layout.parentWidget() and layout.parentWidget().property("formColumns"))
+            layout.setAlignment(Qt.AlignTop if wide_fields else Qt.AlignTop | Qt.AlignLeft)
             last_row = self._last_used_grid_row(layout)
             if last_row >= 0:
                 layout.setRowStretch(last_row + 1, 1)
@@ -404,22 +412,45 @@ class MainWindow(
                     self._compact_status_layout_tree(scroll_widget, is_root=True)
                 continue
 
+            if isinstance(child_widget, (QSpinBox, QDoubleSpinBox)):
+                self._fit_numeric_input_width(child_widget)
+
             if child_widget.layout() is not None:
                 self._compact_status_layout_tree(child_widget, is_root=True)
 
+    def _fit_numeric_input_width(self, control):
+        """修复新主题下旧固定宽度遮住负号或末位的问题，只改变宽度不改变数据范围。"""
+        candidates = [control.prefix() + control.textFromValue(value) + control.suffix()
+                      for value in (control.minimum(), control.maximum(), control.value())]
+        needed = max(control.fontMetrics().horizontalAdvance(text) for text in candidates) + 38
+        if control.minimumWidth() == control.maximumWidth():
+            control.setFixedWidth(max(control.minimumWidth(), needed))
+        else:
+            control.setMinimumWidth(max(control.minimumWidth(), needed))
+
     def create_scenario_group(self) -> QGroupBox:
         """创建协议和场景选择组"""
-        group = QGroupBox("协议和测试场景")
+        group = PaletteCard("协议和测试场景")
+        group.setProperty("card", True)
         layout = QVBoxLayout(group)
+        layout.setContentsMargins(12, 12, 12, 10)
+        layout.setSpacing(8)
 
         # 协议选择
         protocol_layout = QHBoxLayout()
-        protocol_layout.addWidget(QLabel("协议列表:"))
-        self.protocol_combo = QComboBox()
+        protocol_label = QLabel("协议列表:")
+        protocol_label.setMinimumWidth(96)
+        protocol_layout.addWidget(protocol_label)
+        self.protocol_combo = ProtocolSelector()
         self.protocol_combo.addItems(SUPPORTED_PROTOCOLS)
         self.protocol_combo.setCurrentText(PROTOCOL_RUILUN)
         self.protocol_combo.currentTextChanged.connect(self.on_protocol_changed)
-        protocol_layout.addWidget(self.protocol_combo)
+        protocol_layout.addWidget(self.protocol_combo, 1)
+        self.frame_config_btn = QPushButton("帧配置")
+        self.frame_config_btn.setIcon(button_icon("file"))
+        self.frame_config_btn.setFixedWidth(150)
+        self.frame_config_btn.setEnabled(False)
+        self.frame_config_btn.clicked.connect(self.open_frame_config)
         layout.addLayout(protocol_layout)
 
         # 预设场景
@@ -448,17 +479,11 @@ class MainWindow(
         preset_layout.addWidget(self.frame_custom_radio)
 
         layout.addLayout(preset_layout)
-
-        # 自定义模式管理
-        custom_layout = QHBoxLayout()
-
-        # 全部自定义配置按钮
-        self.frame_config_btn = QPushButton("帧配置")
-        self.frame_config_btn.setEnabled(False)
-        self.frame_config_btn.clicked.connect(self.open_frame_config)
-        custom_layout.addWidget(self.frame_config_btn)
-
-        layout.addLayout(custom_layout)
+        frame_layout = QHBoxLayout()
+        frame_layout.addStretch()
+        frame_layout.addWidget(self.frame_config_btn)
+        frame_layout.addStretch()
+        layout.addLayout(frame_layout)
 
         # 连接信号
         self.scenario_group.buttonClicked.connect(self.on_scenario_changed)
@@ -466,44 +491,70 @@ class MainWindow(
         return group
 
     def create_status_config_group(self) -> QGroupBox:
-        """创建Status位配置组"""
-        group = QGroupBox("Status位配置")
-
-        # 创建滚动区域
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setMaximumHeight(300)
-
-        # 创建配置面板
-        config_widget = QWidget()
-        layout = QVBoxLayout(config_widget)
-
-        # 创建标签页
-        self.status_tabs = QTabWidget()
-
-        # 默认显示瑞轮协议的Status配置
+        """参数按页滚动，预设保持可浏览，并明确提示编辑入口。"""
+        group = PaletteCard("协议参数")
+        group.setProperty("card", True)
+        self.parameter_group = group
+        layout = QVBoxLayout(group)
+        layout.setContentsMargins(12, 12, 12, 10)
+        layout.setSpacing(0)
+        # 保留原标签引用，实际标题与提示改为各参数页内的上下层次。
+        self.parameter_page_label = QLabel("参数页：Status1", group)
+        self.parameter_page_label.hide()
+        self.parameter_mode_label = StatusBadge("预设预览", "eye")
+        set_badge_tone(self.parameter_mode_label, "muted")
+        self.status_tabs = ProtocolTabs()
+        self.status_tabs.setCornerWidget(self.parameter_mode_label, Qt.TopRightCorner)
         self.show_ruilun_status_config()
-
-        layout.addWidget(self.status_tabs)
-
-        scroll.setWidget(config_widget)
-
-        # 设置组布局
-        group_layout = QVBoxLayout(group)
-        group_layout.addWidget(scroll)
-
-        # 默认禁用（选择预设场景时）
-        self.status_tabs.setEnabled(False)
-
+        self.status_tabs.currentChanged.connect(self._refresh_parameter_mode)
+        layout.addWidget(self.status_tabs, 1)
+        self.parameter_hint = QLabel("切换数据自定义后可编辑；预设状态下可浏览所有参数页。", group)
+        self.parameter_hint.setProperty("muted", True)
+        self.parameter_hint.setWordWrap(True)
+        self.parameter_hint.hide()
+        self.status_tabs.set_editable(False)
+        self._refresh_parameter_mode()
         return group
+
+    def _refresh_parameter_mode(self, *_):
+        """只刷新编辑提示和当前页名称，不修改状态值或场景选择。"""
+        scenario = self.scenario_group.checkedId()
+        index = self.status_tabs.currentIndex()
+        page = self.status_tabs.tabText(index) if index >= 0 else ""
+        self.parameter_page_label.setText("参数页：" + page)
+        if scenario == 3:
+            self.parameter_mode_label.setText("可编辑")
+            self.parameter_mode_label.set_icon("edit")
+            set_badge_tone(self.parameter_mode_label, "ready")
+            hint = "参数修改将用于后续发送帧"
+        elif scenario == 4:
+            self.parameter_mode_label.setText("原始帧编辑")
+            self.parameter_mode_label.set_icon("file")
+            set_badge_tone(self.parameter_mode_label, "muted")
+            hint = "请点击帧配置修改原始字节"
+        else:
+            self.parameter_mode_label.setText("预设预览")
+            self.parameter_mode_label.set_icon("eye")
+            set_badge_tone(self.parameter_mode_label, "muted")
+            hint = "切换数据自定义后可编辑"
+        if hasattr(self, "parameter_hint"):
+            self.parameter_hint.setText(hint)
+        sections = {"Status1": "运行指示", "Status2": "故障状态", "Status3": "运行状态", "Status4": "功能状态", "Status5-9": "运行数据"}
+        title = sections.get(page, "状态参数") + " · " + page
+        self.status_tabs.set_page_context(title, hint)
 
     def create_send_control_group(self) -> QGroupBox:
         """创建发送控制组"""
-        group = QGroupBox("发送控制")
+        group = PaletteCard("发送控制")
+        group.setProperty("card", True)
         layout = QGridLayout(group)
+        layout.setContentsMargins(12, 12, 12, 10)
+        layout.setHorizontalSpacing(8)
+        layout.setVerticalSpacing(7)
 
         # 发送间隔
-        layout.addWidget(QLabel("发送间隔 (ms):"), 0, 0)
+        interval_row = QHBoxLayout()
+        interval_row.addWidget(QLabel("发送间隔 (ms):"))
         self.interval_spin = QSpinBox()
         self.interval_spin.setRange(
             DEFAULT_PROTOCOL_DEFINITION.min_send_interval_ms,
@@ -518,7 +569,17 @@ class MainWindow(
             "过快可能造成覆盖、丢帧或实际周期变长。"
         )
         self.interval_spin.valueChanged.connect(self.on_interval_changed)
-        layout.addWidget(self.interval_spin, 0, 1)
+        self.interval_spin.setFixedWidth(175)
+        interval_row.addWidget(self.interval_spin)
+        interval_row.addStretch()
+        self.send_status = StatusBadge("就绪")
+        set_badge_tone(self.send_status, "muted")
+        self.send_status.hide()
+        interval_row.addWidget(self.send_status)
+        self.send_connection_hint = StatusBadge("请先连接串口")
+        set_badge_tone(self.send_connection_hint, "warning")
+        interval_row.addWidget(self.send_connection_hint)
+        layout.addLayout(interval_row, 0, 0, 1, 2)
 
         # 发送按钮
         self.single_send_btn = QPushButton("单次发送")
@@ -527,6 +588,7 @@ class MainWindow(
         layout.addWidget(self.single_send_btn, 1, 0)
 
         self.cyclic_send_btn = QPushButton("循环发送")
+        self.cyclic_send_btn.setProperty("visualRole", "primary")
         self.cyclic_send_btn.clicked.connect(self.toggle_cyclic_send)
         self.cyclic_send_btn.setEnabled(False)
         layout.addWidget(self.cyclic_send_btn, 1, 1)
@@ -540,45 +602,53 @@ class MainWindow(
         self.packet_sequence_send_btn.setEnabled(False)
         layout.addWidget(self.packet_sequence_send_btn, 2, 1)
 
-        # 发送状态
-        self.send_status = QLabel("就绪")
-        self.send_status.setStyleSheet("color: blue; font-weight: bold;")
-        layout.addWidget(self.send_status, 3, 0, 1, 2)
-
         self.send_statistics_label = QLabel("已写入 0 帧 | 写入周期 -- | 缓冲 0 字节")
         self.send_statistics_label.setToolTip("统计为软件写入驱动的结果和调用间隔，不代表单线侧波形的实测周期。")
         self.send_statistics_label.setWordWrap(True)
-        layout.addWidget(self.send_statistics_label, 4, 0, 1, 2)
+        statistics_row = QHBoxLayout()
+        statistics_row.addWidget(self.send_statistics_label, 1)
+        layout.addLayout(statistics_row, 3, 0, 1, 2)
 
         return group
 
     def create_monitor_panel(self) -> QWidget:
-        """创建右侧监控面板"""
+        """当前预览与实际写入历史分别显示，并允许用户调整上下高度。"""
         panel = QWidget()
+        panel.setObjectName("monitorPanel")
+        panel.setMinimumWidth(410)
         layout = QVBoxLayout(panel)
-
-        # 数据监控组
-        monitor_group = QGroupBox("数据监控")
-        monitor_layout = QVBoxLayout(monitor_group)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.monitor_splitter = GripSplitter(Qt.Vertical)
+        self._monitor_user_sized = False
+        self._preview_fit_pending = False
+        self.monitor_splitter.setChildrenCollapsible(False)
+        self.monitor_splitter.setHandleWidth(10)
+        layout.addWidget(self.monitor_splitter)
 
         # 当前帧数据显示
-        current_frame_group = QGroupBox("当前帧数据")
+        current_frame_group = PaletteCard("当前待发送帧")
+        self.current_frame_group = current_frame_group
+        current_frame_group.setProperty("card", True)
         current_frame_layout = QVBoxLayout(current_frame_group)
-
-        self.current_frame_text = QTextEdit()
-        self.current_frame_text.setMaximumHeight(200)
-        self.current_frame_text.setFont(QFont("Consolas", 9))
-        current_frame_layout.addWidget(self.current_frame_text)
-
-        monitor_layout.addWidget(current_frame_group)
+        current_frame_layout.setContentsMargins(12, 12, 12, 10)
+        self.frame_preview = FramePreview()
+        self.current_frame_text = self.frame_preview.legacy_text
+        current_frame_layout.addWidget(self.frame_preview)
+        self.monitor_splitter.addWidget(current_frame_group)
 
         # 发送历史记录
-        history_group = QGroupBox("发送历史")
+        history_group = PaletteCard("发送历史")
+        self.history_group = history_group
+        history_group.setProperty("card", True)
         history_layout = QVBoxLayout(history_group)
+        history_layout.setContentsMargins(12, 12, 12, 10)
+        history_layout.setSpacing(7)
 
         # 控制按钮
         history_controls = QHBoxLayout()
         self.clear_history_btn = QPushButton("清空记录")
+        self.clear_history_btn.setObjectName("clearHistoryButton")
+        self.clear_history_btn.setIcon(button_icon("trash"))
         self.clear_history_btn.clicked.connect(self.clear_send_history)
         history_controls.addWidget(self.clear_history_btn)
 
@@ -591,15 +661,58 @@ class MainWindow(
 
         # 历史记录文本
         self.history_text = QTextEdit()
+        self.history_text.setReadOnly(True)
+        self.history_text.setPlaceholderText("暂无发送记录")
         self.history_text.setFont(QFont("Consolas", 8))
         self.history_text.document().setMaximumBlockCount(MAX_HISTORY_BLOCKS)
-        history_layout.addWidget(self.history_text)
+        # 原文本接口继续保存相同日志，界面只展示同批次的只读分列表格。
+        self.history_text.setParent(panel)
+        self.history_text.hide()
+        self.history_view = SendHistoryView(MAX_HISTORY_BLOCKS)
+        history_layout.addWidget(self.history_view)
 
-        monitor_layout.addWidget(history_group)
-
-        layout.addWidget(monitor_group)
+        self.monitor_splitter.addWidget(history_group)
+        self.monitor_splitter.setSizes([470, 230])
+        self.monitor_splitter.setStretchFactor(0, 2)
+        self.monitor_splitter.setStretchFactor(1, 1)
+        self.monitor_splitter.splitterMoved.connect(self._remember_monitor_split)
+        self.frame_preview.views.currentChanged.connect(self._schedule_preview_fit)
 
         return panel
+
+    def _remember_monitor_split(self, *_):
+        """用户拖动后保留其分配，不再因字段修改自动挪动历史区域。"""
+        self._monitor_user_sized = True
+
+    def _schedule_preview_fit(self, *_):
+        """布局完成后合并一次高度调整，不新增周期性刷新或编码调用。"""
+        if self._monitor_user_sized or self._preview_fit_pending:
+            return
+        self._preview_fit_pending = True
+        QTimer.singleShot(0, self._fit_preview_height)
+
+    def _fit_preview_height(self):
+        """按当前帧字节数利用空间；小窗口仍允许表格滚动，历史不会被挤没。"""
+        self._preview_fit_pending = False
+        if self._monitor_user_sized or self.frame_preview.views.currentIndex() != 0:
+            return
+        sizes = self.monitor_splitter.sizes()
+        if len(sizes) != 2 or not all(sizes):
+            return
+        table = self.frame_preview.table
+        required = sum(table.rowHeight(row) for row in range(table.rowCount()))
+        minimum = self.current_frame_group.minimumSizeHint().height()
+        maximum = max(minimum, sum(sizes) - self.history_group.minimumSizeHint().height())
+        desired = max(minimum, min(maximum, max(sum(sizes) * 0.52, sizes[0] + required - table.viewport().height() + 2)))
+        desired = int(desired)
+        if abs(desired - sizes[0]) > 2:
+            self.monitor_splitter.setSizes([desired, sum(sizes) - desired])
+
+    def resizeEvent(self, event):
+        """窗口尺寸变化后重新分配默认预览高度，保留用户已拖动的比例。"""
+        super().resizeEvent(event)
+        if hasattr(self, "monitor_splitter"):
+            self._schedule_preview_fit()
 
     def create_status_bar(self):
         """创建状态栏"""
@@ -608,6 +721,9 @@ class MainWindow(
 
         # 添加状态信息
         self.status_bar.showMessage("就绪")
+        measurement_hint = QLabel("软件写入统计 · 非物理层实测")
+        measurement_hint.setProperty("muted", True)
+        self.status_bar.addPermanentWidget(measurement_hint, 1)
 
         # 添加版本信息
         version_label = QLabel(f"软件: V{APP_VERSION}  |  协议: V{PROTOCOL_VERSION}")
@@ -758,6 +874,7 @@ class MainWindow(
         # 批量添加所有待更新的记录
         for history_line in self.pending_history_updates:
             self.history_text.append(history_line)
+        self.history_view.append_lines(self.pending_history_updates, self.auto_scroll_cb.isChecked())
 
         # 清空缓冲区
         self.pending_history_updates.clear()
@@ -771,9 +888,13 @@ class MainWindow(
     @pyqtSlot(str)
     def on_port_connected(self, port_name):
         """串口连接成功"""
-        self.connection_status.setText(f"已连接: {port_name}")
-        self.connection_status.setStyleSheet("color: green; font-weight: bold;")
+        self.connection_status.setText("已连接")
+        self.connection_status.setToolTip(f"已连接: {port_name}")
+        set_badge_tone(self.connection_status, "ready")
         self.connect_btn.setText("断开")
+        set_visual_property(self.connect_btn, "visualRole", "secondary")
+        self.send_connection_hint.hide()
+        self.send_status.show()
 
         # 启用发送按钮
         self.single_send_btn.setEnabled(True)
@@ -789,8 +910,12 @@ class MainWindow(
     def on_port_disconnected(self, port_name):
         """串口断开连接"""
         self.connection_status.setText("未连接")
-        self.connection_status.setStyleSheet("color: red; font-weight: bold;")
+        self.connection_status.setToolTip("未连接串口")
+        set_badge_tone(self.connection_status, "muted")
         self.connect_btn.setText("连接")
+        set_visual_property(self.connect_btn, "visualRole", "primary")
+        self.send_connection_hint.show()
+        self.send_status.hide()
 
         # 禁用发送按钮
         self.single_send_btn.setEnabled(False)
@@ -802,7 +927,7 @@ class MainWindow(
         self.cyclic_send_btn.setText("循环发送")
 
         self.send_status.setText("就绪")
-        self.send_status.setStyleSheet("color: blue; font-weight: bold;")
+        set_badge_tone(self.send_status, "muted")
 
         self.status_bar.showMessage(f"串口 {port_name} 已断开")
 
@@ -825,7 +950,7 @@ class MainWindow(
             self.serial_manager.stop_cyclic_send()
             self._reset_send_action_buttons()
             self.send_status.setText("就绪")
-            self.send_status.setStyleSheet("color: blue; font-weight: bold;")
+            set_badge_tone(self.send_status, "muted")
 
         self.current_protocol = protocol_name
         self.custom_frame_data = None
@@ -1012,10 +1137,10 @@ class MainWindow(
         previous_scenario = getattr(self, '_previous_scenario_id', None)
 
         if scenario_id == 3:  # 数据自定义场景
-            self.status_tabs.setEnabled(True)
+            self.status_tabs.set_editable(True)
             self.frame_config_btn.setEnabled(False)
         elif scenario_id == 4:  # 全部自定义场景
-            self.status_tabs.setEnabled(False)
+            self.status_tabs.set_editable(False)
             self.frame_config_btn.setEnabled(True)
 
             frame_length = self.protocol_handler.get_protocol_frame_length(self.current_protocol)
@@ -1033,7 +1158,7 @@ class MainWindow(
                     QMessageBox.critical(self, "帧生成失败", str(exc))
                     return
         else:
-            self.status_tabs.setEnabled(False)
+            self.status_tabs.set_editable(False)
             self.frame_config_btn.setEnabled(False)
 
             try:
@@ -1046,6 +1171,7 @@ class MainWindow(
 
         # 记录当前场景ID，用于下次切换时判断
         self._previous_scenario_id = scenario_id
+        self._refresh_parameter_mode()
         self.update_current_frame_display()
 
     def load_ruilun_preset_scenario(self, scenario_id):
@@ -1248,10 +1374,10 @@ class MainWindow(
         if self.frame_custom_radio.isChecked():
             # 全部自定义模式 - 使用自定义帧数据
             if self.custom_frame_data is not None:
-                display_text = self.protocol_handler.format_frame_display(self.custom_frame_data)
-                self.current_frame_text.setPlainText(display_text)
+                self._display_frame_snapshot(self.custom_frame_data)
             else:
                 self.current_frame_text.setPlainText("请配置自定义帧数据")
+                self.frame_preview.show_error("请配置自定义帧数据")
         else:
             # 数据自定义或预设模式 - 使用Status生成帧数据（预览模式）
             # 获取当前Status配置
@@ -1265,10 +1391,19 @@ class MainWindow(
 
             if success:
                 # 格式化显示
-                display_text = self.protocol_handler.format_frame_display(frame_data)
-                self.current_frame_text.setPlainText(display_text)
+                self._display_frame_snapshot(frame_data)
             else:
                 self.current_frame_text.setPlainText(f"帧生成失败: {error_msg}")
+                self.frame_preview.show_error(f"帧生成失败: {error_msg}")
+
+    def _display_frame_snapshot(self, frame_data):
+        """将同一预览快照交给两种只读视图，保留原格式且不增加编码调用。"""
+        self.current_frame_text.setPlainText(self.protocol_handler.format_frame_display(frame_data))
+        self.frame_preview.set_frame(
+            self.current_protocol, frame_data,
+            self.protocol_handler.get_byte_descriptions(self.current_protocol),
+        )
+        self._schedule_preview_fit()
 
     @pyqtSlot()
     def send_single_frame(self):
@@ -1327,7 +1462,7 @@ class MainWindow(
                 self.serial_manager.stop_cyclic_send()
                 self._reset_send_action_buttons()
                 self.send_status.setText("就绪")
-                self.send_status.setStyleSheet("color: blue; font-weight: bold;")
+                set_badge_tone(self.send_status, "muted")
                 return
             # 停止循环发送
             self.serial_manager.stop_cyclic_send()
@@ -1335,7 +1470,7 @@ class MainWindow(
             self.packet_sequence_send_btn.setText("包组循环")
             self.cyclic_send_btn.setText("循环发送")
             self.send_status.setText("就绪")
-            self.send_status.setStyleSheet("color: blue; font-weight: bold;")
+            set_badge_tone(self.send_status, "muted")
         else:
             # 开始循环发送
             # 检查当前模式并获取帧数据
@@ -1380,7 +1515,7 @@ class MainWindow(
                 self.packet_sequence_send_btn.setText("包组循环")
                 self.cyclic_send_btn.setText("停止发送")
                 self.send_status.setText("循环发送中...")
-                self.send_status.setStyleSheet("color: orange; font-weight: bold;")
+                set_badge_tone(self.send_status, "running")
             else:
                 QMessageBox.critical(self, "发送失败", error_msg)
 
@@ -1435,7 +1570,7 @@ class MainWindow(
                 self.serial_manager.stop_cyclic_send()
                 self._reset_send_action_buttons()
                 self.send_status.setText("就绪")
-                self.send_status.setStyleSheet("color: blue; font-weight: bold;")
+                set_badge_tone(self.send_status, "muted")
                 return
             self.serial_manager.stop_cyclic_send()
             self._reset_send_action_buttons()
@@ -1467,7 +1602,7 @@ class MainWindow(
             self.cyclic_send_btn.setText("循环发送")
             self.packet_sequence_send_btn.setText("停止包组")
             self.send_status.setText("包组循环发送中...")
-            self.send_status.setStyleSheet("color: orange; font-weight: bold;")
+            set_badge_tone(self.send_status, "running")
         else:
             QMessageBox.critical(self, "发送失败", error_msg)
 
@@ -1493,6 +1628,7 @@ class MainWindow(
 
         # 错误信息立即显示，不使用缓冲
         self.history_text.append(history_line)
+        self.history_view.append_lines([history_line], self.auto_scroll_cb.isChecked())
 
         # 自动滚动到底部
         if self.auto_scroll_cb.isChecked():
@@ -1507,7 +1643,9 @@ class MainWindow(
         # 即使串口异常已先停止定时器，也要保留最终失败状态。
         self._reset_send_action_buttons()
         self.send_status.setText("发送失败")
-        self.send_status.setStyleSheet("color: red; font-weight: bold;")
+        set_badge_tone(self.send_status, "error")
+        self.send_connection_hint.hide()
+        self.send_status.show()
 
     @pyqtSlot(str)
     def on_connection_error(self, error_msg):
@@ -1518,6 +1656,7 @@ class MainWindow(
     def clear_send_history(self):
         """清空发送历史"""
         self.history_text.clear()
+        self.history_view.clear()
         # 同时清空待更新的缓冲区
         self.pending_history_updates.clear()
 

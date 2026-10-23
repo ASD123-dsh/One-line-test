@@ -47,6 +47,11 @@ class CommonProtocolForms:
         layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
 
         protocol = self.current_protocol
+        if protocol == PROTOCOL_RUILUN:
+            # 对齐参考图的双列分布，避免四个选项挤在左半边；数据与信号不变。
+            widget.setProperty("formColumns", True)
+            layout.setColumnStretch(0, 1)
+            layout.setColumnStretch(1, 1)
         if protocol == PROTOCOL_HANGZHOU_ANXIAN:
             layout.setContentsMargins(8, 8, 8, 8)
             layout.setHorizontalSpacing(18)

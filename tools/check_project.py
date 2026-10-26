@@ -12,6 +12,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_DIRS = ("gui", "protocol", "serial_comm", "updating", "licensing", "tools", "tests")
 ROOT_SOURCES = ("main.py", "app_info.py", "app_paths.py", "app_settings.py", "diagnostics.py")
+PRIVATE_LOCAL_SOURCES = frozenset(("tools/activation_tool.py", "tools/generate_activation_code.py"))
 
 
 def source_files():
@@ -36,17 +37,29 @@ def check_sources(paths):
     return errors
 
 
-def untracked_sources(paths):
-    """只读比较 Git 清单，确保新增协议模块与上次归档工具不会漏提交。"""
+def tracked_source_names():
+    """只读读取 Git 清单，供遗漏检查及本地私有工具防上传检查复用。"""
     result = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, check=True)
-    tracked = set(result.stdout.decode("utf-8").split("\0"))
-    required = [path.relative_to(ROOT).as_posix() for path in paths]
+    return set(result.stdout.decode("utf-8").split("\0"))
+
+
+def untracked_sources(paths):
+    """只读检查公开源码遗漏；本地私有工具仍做语法检查，但不能要求把它们提交。"""
+    tracked = tracked_source_names()
+    # 修复私有工具取消跟踪后本地 --require-tracked 误报，例外仅限两个明确路径。
+    required = [path.relative_to(ROOT).as_posix() for path in paths
+                if path.relative_to(ROOT).as_posix() not in PRIVATE_LOCAL_SOURCES]
     required.extend((
         ".github/workflows/source-checks.yml", "requirements-lock.txt", "requirements-build.txt",
         "README.md", "AGENTS.md", "docs/adding_protocol.md", "docs/releasing.md",
         "docs/optimization-20261019.md", "docs/release-archive-20261015.md",
     ))
     return sorted(name for name in required if name not in tracked)
+
+
+def tracked_private_sources():
+    """阻止私有工具被强制加入 Git，避免后续发布时意外再次上传。"""
+    return sorted(tracked_source_names() & PRIVATE_LOCAL_SOURCES)
 
 
 def main():
@@ -60,6 +73,7 @@ def main():
     if args.require_tracked:
         try:
             errors.extend("未纳入 Git：" + name for name in untracked_sources(paths))
+            errors.extend("本地私有工具不得纳入 Git：" + name for name in tracked_private_sources())
         except (OSError, subprocess.CalledProcessError, UnicodeError) as exc:
             errors.append(f"无法读取 Git 源码清单：{exc}")
     if errors:

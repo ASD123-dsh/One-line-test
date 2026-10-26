@@ -90,6 +90,9 @@ Desktop.ini
 # Local activation private key
 keys/
 tools/activation_code.txt
+# 激活码生成工具仅保留本地，禁止再次作为公开源码提交。
+/tools/activation_tool.py
+/tools/generate_activation_code.py
 
 # Documentation
 PDF/

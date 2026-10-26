@@ -18,7 +18,6 @@ from licensing.activation import (
     normalize_device_code,
     verify_activation_code,
 )
-from tools.activation_tool import save_activation_code_file
 
 
 class ActivationTests(unittest.TestCase):
@@ -173,6 +172,14 @@ class ActivationTests(unittest.TestCase):
         )
 
     def test_save_activation_code_file_writes_txt_content(self):
+        """私有工具在本机时验证导出；公开检出缺少工具时只跳过该项，不跳过激活回归。"""
+        # 修复公开仓库移除生成工具后整组激活测试无法导入的问题，不吞掉工具内部导入异常。
+        try:
+            from tools.activation_tool import save_activation_code_file
+        except ModuleNotFoundError as exc:
+            if exc.name != "tools.activation_tool":
+                raise
+            self.skipTest("激活码导出工具仅保留本地，公开检出不包含此工具")
         with tempfile.TemporaryDirectory() as temp_dir:
             output_path = Path(temp_dir) / "activation_code.txt"
 

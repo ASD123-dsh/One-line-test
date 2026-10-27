@@ -159,6 +159,16 @@ PROTOCOL_UI_SPECS = MappingProxyType({
 如果仓库中的 `ProtocolUiSpec` 字段名后续调整，应以该文件当前定义为准，但仍应
 维持切换、场景加载、状态读取及状态恢复的集中映射。
 
+### 协议名称搜索索引
+
+在 `gui/protocol_search.py` 的 `PROTOCOL_SEARCH_ALIASES` 中，以同一个协议常量为键
+补充全拼和首字母，保留型号及英文部分；不把拼音别名注册成可发送的新协议。
+例如瑞轮协议使用 `("ruilunxieyi", "rlxy")`。多音字按协议名称实际读音登记，
+`ü` 可写 `v`，需要兼容的其他拼写再明确增加，避免引入全局拼音依赖。
+
+`tests/test_protocol_search.py` 会核对索引覆盖全部注册协议，并验证搜索只过滤结果，
+不切换协议、不停止循环；只有用户明确选中合法结果时才执行原切换流程。
+
 ## 6. 统一校验自定义帧
 
 协议固定帧长度来自 `ProtocolDefinition.frame_length`。单帧配置、包组导入和串口
@@ -254,6 +264,7 @@ python -m unittest tests.test_protocol_handler -v
 - [ ] 发送预览不会意外消耗序号
 - [ ] 三类场景及字节说明已补充
 - [ ] UI 注册表和协议注册表键集合一致
+- [ ] `gui/protocol_search.py` 已补充全拼和首字母，中文及型号搜索仍可用
 - [ ] 自定义帧使用 `frame_utils.py` 校验
 - [ ] 已知向量、边界、异常和 UI 测试已通过
 - [ ] 全量单元测试与只读 Python 语法检查已通过

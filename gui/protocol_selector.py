@@ -109,7 +109,9 @@ class ProtocolSelector(QComboBox):
             if watched is self._search and event.key() in (Qt.Key_Up, Qt.Key_Down) and event.modifiers() == Qt.NoModifier:
                 self._move_result(-1 if event.key() == Qt.Key_Up else 1)
                 return True
-        if event.type() == QEvent.MouseButtonPress and not inside_popup:
+        # 修复真实鼠标点击先经过 QWindow 时被误判为外部点击的问题；
+        # 等待事件分发到 QWidget 后再判断归属，避免列表提交选中项前被收起。
+        if event.type() == QEvent.MouseButtonPress and is_widget and not inside_popup:
             on_combo = is_widget and (watched is self or self.isAncestorOf(watched))
             self.hidePopup()
             # 再次点击同一箭头是收起，其他位置的鼠标事件继续执行原有动作。

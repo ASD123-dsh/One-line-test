@@ -33,7 +33,8 @@ class ProtocolTabs(QTabWidget):
             body = QVBoxLayout(wrapper)
             body.setContentsMargins(0, 0, 0, 0)
             body.setSpacing(2)
-            heading = QFrame()
+            # 修复切换协议时的闪窗：创建时就归属参数页，避免显示后才入布局形成临时顶层窗口。
+            heading = QFrame(wrapper)
             heading.setObjectName("parameterSectionHeader")
             row = QHBoxLayout(heading)
             row.setContentsMargins(4, 6, 4, 6)

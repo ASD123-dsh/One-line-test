@@ -8,21 +8,105 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt5.QtCore import QModelIndex, QPoint, Qt
+from PyQt5.QtCore import QEvent, QModelIndex, QObject, QPoint, Qt
 from PyQt5.QtGui import QColor
 from PyQt5.QtTest import QSignalSpy
-from PyQt5.QtWidgets import QAbstractItemView, QApplication, QLabel
+from PyQt5.QtWidgets import QAbstractItemView, QApplication, QLabel, QWidget
 
 from app_settings import SettingsStore
 from gui.frame_preview import FramePreview
 from gui.main_window import MainWindow
+from gui.protocol_tabs import ProtocolTabs
 from gui.send_history import HistoryTableModel, SendHistoryView
 from gui.ui_icons import StatusBadge, ui_icon
 from gui.soft_theme import PALETTE
-from protocol.definitions import PROTOCOL_LISHEN_BMS, PROTOCOL_RUILUN
+from protocol.definitions import PROTOCOL_LISHEN_BMS, PROTOCOL_RUILUN, SUPPORTED_PROTOCOLS
 from serial_comm.serial_manager import SerialManager, SerialPortDetector
 
 _APP = QApplication.instance() or QApplication([])
+
+
+class ParameterHeaderEvents(QObject):
+    """旁观标题瞬时顶层显示，不能只凭切换完成后的窗口快照判断无闪窗。"""
+
+    def __init__(self):
+        """仅保存事件次数，不持有可能在切换时销毁的控件。"""
+        super().__init__()
+        self.top_level_shows = 0
+
+    def eventFilter(self, watched, event):
+        """记录真实 Show 事件，不改变焦点、可见性或事件传播。"""
+        if event.type() == QEvent.Show and isinstance(watched, QWidget) and watched.objectName() == "parameterSectionHeader" and watched.isWindow():
+            self.top_level_shows += 1
+        return False
+
+
+class ParameterHeaderLifecycleTests(unittest.TestCase):
+    """参数标题必须从创建起属于页内，同时保留原显示、只读和页签结构。"""
+
+    def setUp(self):
+        """在控件创建前安装观察器，覆盖初始化和重建时的一闪而过。"""
+        self.events = ParameterHeaderEvents()
+        _APP.installEventFilter(self.events)
+        self.addCleanup(_APP.removeEventFilter, self.events)
+
+    def test_status_header_does_not_show_as_a_top_level_window(self):
+        """Status 标题保持可见，但任何时刻都不能先作为独立窗口显示。"""
+        tabs = ProtocolTabs()
+        self.addCleanup(tabs.close)
+        tabs.addTab(QWidget(), "Status1")
+        tabs.set_page_context("运行指示 · Status1", "切换数据自定义后可编辑")
+        tabs.show()
+        _APP.processEvents()
+        page = tabs.currentWidget()
+        header = page._section_title.parentWidget()
+        self.assertIs(header.parentWidget(), page.widget())
+        self.assertFalse(header.isWindow())
+        self.assertTrue(header.isVisible())
+        self.assertEqual(page._section_title.text(), "运行指示 · Status1")
+        self.assertEqual(self.events.top_level_shows, 0)
+
+    def test_data_page_header_stays_hidden_and_editability_is_unchanged(self):
+        """非 Status 页仍隐藏原重复标题，页内内容和只读切换保持原契约。"""
+        tabs = ProtocolTabs()
+        self.addCleanup(tabs.close)
+        content = QWidget()
+        tabs.addTab(content, "电池数据")
+        tabs.show()
+        _APP.processEvents()
+        header = tabs.currentWidget()._section_title.parentWidget()
+        self.assertTrue(header.isHidden())
+        self.assertIs(tabs.page_content(0), content)
+        self.assertFalse(content.isEnabled())
+        tabs.set_editable(True)
+        self.assertTrue(content.isEnabled())
+        tabs.set_editable(False)
+        self.assertFalse(content.isEnabled())
+        self.assertEqual(self.events.top_level_shows, 0)
+
+    def test_initialization_and_all_protocol_switches_have_no_header_flash(self):
+        """主窗口首次创建及十九协议重建均不能弹出临时标题窗口。"""
+        with patch.object(SerialPortDetector, "start_detection"), \
+                patch.object(SerialManager, "scan_ports", return_value=[]), \
+                patch.object(MainWindow, "refresh_recovery_notice"):
+            window = MainWindow(settings_store=SettingsStore())
+        self.addCleanup(window.close)
+        window.history_update_timer.stop()
+        window.show()
+        _APP.processEvents()
+        for name in SUPPORTED_PROTOCOLS:
+            with self.subTest(protocol=name):
+                window.protocol_combo.setCurrentText(name)
+                _APP.processEvents()
+                self.assertEqual(window.current_protocol, name)
+                self.assertGreater(window.status_tabs.count(), 0)
+                for index in range(window.status_tabs.count()):
+                    window.status_tabs.setCurrentIndex(index)
+                    page = window.status_tabs.currentWidget()
+                    header = page._section_title.parentWidget()
+                    self.assertIs(header.parentWidget(), page.widget())
+                    self.assertEqual(header.isHidden(), not window.status_tabs.tabText(index).startswith("Status"))
+        self.assertEqual(self.events.top_level_shows, 0)
 
 
 class HistoryModelTests(unittest.TestCase):

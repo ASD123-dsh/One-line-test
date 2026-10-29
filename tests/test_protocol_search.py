@@ -27,6 +27,21 @@ from serial_comm.serial_manager import SerialManager, SerialPortDetector
 _APP = QApplication.instance() or QApplication([])
 
 
+def click_window_result(combo, name):
+    """通过 QWindow 投递鼠标点击，覆盖真实窗口事件先于列表控件的分发路径。"""
+    item = next(combo._results.item(row) for row in range(combo._results.count())
+                if combo._results.item(row).text() == name)
+    assert not item.isHidden()
+    combo._results.scrollToItem(item)
+    _APP.processEvents()
+    viewport = combo._results.viewport()
+    point = combo._results.visualItemRect(item).center()
+    assert viewport.rect().contains(point)
+    QTest.mouseClick(combo._popup.windowHandle(), Qt.LeftButton,
+                     pos=viewport.mapTo(combo._popup, point))
+    _APP.processEvents()
+
+
 class ProtocolSearchIndexTests(unittest.TestCase):
     """检查全部索引覆盖及原名称回退，不把搜索别名作为协议注册名。"""
 
@@ -232,6 +247,71 @@ class ProtocolSearchInputTests(unittest.TestCase):
         _APP.processEvents()
         self.assertFalse(self.combo._popup.isVisible())
 
+    def test_window_mouse_click_selects_every_registered_protocol(self):
+        """逐项鼠标选择原始列表，防止只测控件信号而漏掉窗口层提前收起的问题。"""
+        for name in SUPPORTED_PROTOCOLS:
+            with self.subTest(protocol=name):
+                self.combo.setCurrentText(PROTOCOL_LISHEN_BMS if name == PROTOCOL_RUILUN else PROTOCOL_RUILUN)
+                self.open_search()
+                changes = QSignalSpy(self.combo.currentTextChanged)
+                click_window_result(self.combo, name)
+                self.assertEqual(self.combo.currentText(), name)
+                self.assertEqual(len(changes), 1)
+                self.assertFalse(self.combo._popup.isVisible())
+
+    def test_window_mouse_click_commits_filtered_original_index(self):
+        """过滤及滚动不改变结果绑定的原协议索引，鼠标选中后只提交一次。"""
+        for query, name in (("y34", PROTOCOL_TAILING_Y34F), ("lishen", PROTOCOL_LISHEN_BMS)):
+            with self.subTest(query=query):
+                self.combo.setCurrentText(PROTOCOL_RUILUN)
+                self.open_search()
+                self.combo._search.setText(query)
+                changes = QSignalSpy(self.combo.currentTextChanged)
+                click_window_result(self.combo, name)
+                self.assertEqual(self.combo.currentText(), name)
+                self.assertEqual(len(changes), 1)
+                self.assertFalse(self.combo._popup.isVisible())
+
+    def test_window_outside_click_closes_and_preserves_action(self):
+        """窗口层外部点击最终交给目标按钮，收起弹层但不能吞掉原有动作。"""
+        self.open_search()
+        clicked = QSignalSpy(self.outside.clicked)
+        point = self.outside.mapTo(self.owner, self.outside.rect().center())
+        QTest.mouseClick(self.owner.windowHandle(), Qt.LeftButton, pos=point)
+        _APP.processEvents()
+        self.assertFalse(self.combo._popup.isVisible())
+        self.assertEqual(len(clicked), 1)
+        self.assertEqual(self.combo.currentText(), PROTOCOL_RUILUN)
+
+    def test_window_combo_click_again_collapses_without_reopening(self):
+        """真实窗口路径重复点击下拉框仍是收起，不被鼠标事件再次打开。"""
+        self.open_search()
+        point = self.combo.mapTo(self.owner, self.combo.rect().center())
+        QTest.mouseClick(self.owner.windowHandle(), Qt.LeftButton, pos=point)
+        _APP.processEvents()
+        self.assertFalse(self.combo._popup.isVisible())
+
+    def test_window_click_empty_results_keeps_popup_and_selection(self):
+        """无匹配结果时点击列表空白不能误选首项或被误当作浮层外点击。"""
+        self.open_search()
+        self.combo._search.setText("not-a-real-protocol")
+        changes = QSignalSpy(self.combo.currentTextChanged)
+        point = self.combo._results.viewport().mapTo(self.combo._popup, self.combo._results.viewport().rect().center())
+        QTest.mouseClick(self.combo._popup.windowHandle(), Qt.LeftButton, pos=point)
+        _APP.processEvents()
+        self.assertEqual(self.combo.currentText(), PROTOCOL_RUILUN)
+        self.assertEqual(len(changes), 0)
+        self.assertTrue(self.combo._popup.isVisible())
+
+    def test_window_click_current_protocol_closes_without_change_signal(self):
+        """点击已选协议只收起列表，不额外触发协议切换或旧协议循环停止。"""
+        self.open_search()
+        changes = QSignalSpy(self.combo.currentTextChanged)
+        click_window_result(self.combo, PROTOCOL_RUILUN)
+        self.assertEqual(self.combo.currentText(), PROTOCOL_RUILUN)
+        self.assertEqual(len(changes), 0)
+        self.assertFalse(self.combo._popup.isVisible())
+
 
 class ProtocolSearchSendSafetyTests(unittest.TestCase):
     """拼音查询与发送流程解耦，只有明确切换协议才停止旧协议循环。"""
@@ -258,6 +338,54 @@ class ProtocolSearchSendSafetyTests(unittest.TestCase):
             window.protocol_combo._commit_selection()
             stop.assert_called_once_with()
         self.assertEqual(window.current_protocol, PROTOCOL_LISHEN_BMS)
+
+    def create_window(self):
+        """创建可接收窗口鼠标事件的真实界面，隔离扫描、恢复提示和客户配置。"""
+        with patch.object(SerialPortDetector, "start_detection"), \
+                patch.object(SerialManager, "scan_ports", return_value=[]), \
+                patch.object(MainWindow, "refresh_recovery_notice"):
+            window = MainWindow(settings_store=SettingsStore())
+        self.addCleanup(window.close)
+        window.history_update_timer.stop()
+        window.resize(1200, 800)
+        window.show()
+        _APP.processEvents()
+        return window
+
+    def test_window_mouse_selection_updates_all_protocols_and_preview(self):
+        """鼠标逐项切换后，实际编码协议、参数状态和字节预览必须同步更新。"""
+        window = self.create_window()
+        window.protocol_combo.setCurrentText(PROTOCOL_LISHEN_BMS)
+        for name in SUPPORTED_PROTOCOLS:
+            with self.subTest(protocol=name):
+                window.protocol_combo.showPopup()
+                _APP.processEvents()
+                click_window_result(window.protocol_combo, name)
+                self.assertEqual(window.protocol_combo.currentText(), name)
+                self.assertEqual(window.current_protocol, name)
+                self.assertEqual(window.protocol_handler.resolve_protocol_name(window.current_status), name)
+                success, frame, error = window.generate_protocol_frame_for_preview(window.current_status)
+                self.assertTrue(success, error)
+                self.assertEqual(window.frame_preview.hex_text.text(), " ".join(f"{byte:02X}" for byte in frame))
+
+    def test_window_mouse_commit_stops_old_cycle_only_when_protocol_changes(self):
+        """查找、取消及选择当前协议不中断循环，鼠标确认另一协议才停止旧帧发送一次。"""
+        window = self.create_window()
+        window.active_send_mode = "single"
+        with patch.object(window.serial_manager, "is_cyclic_sending", return_value=True), \
+                patch.object(window.serial_manager, "stop_cyclic_send") as stop:
+            window.protocol_combo.showPopup()
+            _APP.processEvents()
+            click_window_result(window.protocol_combo, PROTOCOL_RUILUN)
+            stop.assert_not_called()
+            window.protocol_combo.showPopup()
+            window.protocol_combo._search.setText("lishen")
+            _APP.processEvents()
+            stop.assert_not_called()
+            click_window_result(window.protocol_combo, PROTOCOL_LISHEN_BMS)
+            stop.assert_called_once_with()
+            self.assertEqual(window.current_protocol, PROTOCOL_LISHEN_BMS)
+            self.assertFalse(window.protocol_combo._popup.isVisible())
 
 
 if __name__ == "__main__":

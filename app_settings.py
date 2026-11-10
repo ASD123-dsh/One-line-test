@@ -10,7 +10,8 @@ from dataclasses import asdict, fields
 from pathlib import Path
 
 from app_info import APP_ID
-from protocol.definitions import PROTOCOL_DEFINITIONS
+from protocol.definitions import PROTOCOL_DEFINITIONS, PROTOCOL_XINGHENG_BMS
+from protocol.xingheng import normalize_xingheng_test_frame
 from protocol.frame_utils import normalize_frame
 from protocol.models import StatusBits
 from protocol.protocol_handler import ProtocolHandler
@@ -74,7 +75,7 @@ def validate_config(data):
         raise ValueError(error)
     custom = data.get("custom_frame")
     if custom is not None:
-        custom = normalize_frame(custom, expected_length=definition.frame_length)
+        custom = normalize_frame(custom, expected_length=ProtocolHandler().get_protocol_frame_length(name, state))
     if data["scenario_id"] == 4 and custom is None:
         raise ValueError("全部自定义配置缺少完整帧")
     sequences = data.get("packet_sequences", {})
@@ -84,7 +85,11 @@ def validate_config(data):
     for protocol, frames in sequences.items():
         if protocol not in PROTOCOL_DEFINITIONS or not isinstance(frames, list) or not 1 <= len(frames) <= MAX_PACKET_FRAMES:
             raise ValueError("包组协议或帧数无效")
-        normalized[protocol] = [normalize_frame(frame, expected_length=PROTOCOL_DEFINITIONS[protocol].frame_length) for frame in frames]
+        if protocol == PROTOCOL_XINGHENG_BMS:
+            # 星恒按20/31字节保存独立测试包；旧协议仍严格使用原固定帧长度。
+            normalized[protocol] = [normalize_xingheng_test_frame(frame) for frame in frames]
+        else:
+            normalized[protocol] = [normalize_frame(frame, expected_length=PROTOCOL_DEFINITIONS[protocol].frame_length) for frame in frames]
     return {**data, "remember": data.get("remember", False), "status": asdict(state), "custom_frame": custom, "packet_sequences": normalized}
 
 

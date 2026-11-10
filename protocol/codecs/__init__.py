@@ -20,3 +20,4 @@ from .luyuan import LuyuanCodec
 from .lithium import LithiumCodec
 from .battery import BatteryCodec
 from .lishen import LishenBmsCodec
+from .xingheng import XinghengBmsCodec

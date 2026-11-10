@@ -3,6 +3,7 @@
 """协议参数校验，与帧编码分开维护。"""
 
 from typing import Tuple
+from decimal import Decimal
 from .definitions import (
     DEFAULT_PROTOCOL_DEFINITION,
     PROTOCOL_TAILING_Y34B,
@@ -15,6 +16,7 @@ from .definitions import (
     PROTOCOL_JINGXIAN,
     PROTOCOL_LITHIUM_BMS,
     PROTOCOL_LISHEN_BMS,
+    PROTOCOL_XINGHENG_BMS,
     PROTOCOL_LUYUAN_BMS,
     PROTOCOL_SHENZHOUXING,
     PROTOCOL_SXSY,
@@ -36,6 +38,9 @@ class StatusValidation:
             return False, "协议状态必须是 StatusBits 对象"
 
         protocol_name = self.resolve_protocol_name(status)
+        if protocol_name == PROTOCOL_XINGHENG_BMS:
+            # 星恒使用独立物理量，不把旧协议整数SOC/运行电流规则套到新格式。
+            return self._validate_xingheng_status(status)
         if protocol_name == PROTOCOL_LISHEN_BMS:
             # 1V/bit、1℃/bit 均为整数字节，禁止用取模掩盖越界或小数输入。
             for label, value, minimum, maximum in (
@@ -236,4 +241,31 @@ class StatusValidation:
             ):
                 return False, "锂电池BMS最低电芯电压必须在 1.85V 到 4.40V 范围内"
 
+        return True, ""
+
+    def _validate_xingheng_status(self, status):
+        """拒绝越界、非有限值和不能精确编码的数据，保护原始字节不被静默截断。"""
+        from .xingheng import XINGHENG_REALTIME, xingheng_fields
+        try:
+            specs = xingheng_fields(status.xingheng_message_id)
+        except ValueError as exc:
+            return False, str(exc)
+        for spec in specs:
+            value = getattr(status, "xingheng_" + spec.name)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                return False, f"星恒{spec.label}必须为数值"
+            if spec.step == 1 and not isinstance(value, int):
+                return False, f"星恒{spec.label}必须为整数"
+            # 先用数值范围拒绝超大整数/NaN，避免转字符串或取余时发生异常。
+            if not spec.minimum <= value <= spec.maximum:
+                return False, f"星恒{spec.label}必须在{spec.minimum}～{spec.maximum}范围内"
+            number = Decimal(str(value))
+            if number % Decimal(str(spec.step)) != 0:
+                return False, f"星恒{spec.label}必须为{spec.step}的整数倍"
+        if status.xingheng_version & 0x0F == 0x0F:
+            return False, "星恒协议版本的主、次版本不能为F"
+        if status.xingheng_min_temperature_c > status.xingheng_max_temperature_c:
+            return False, "星恒最低温度不能高于最高温度"
+        if status.xingheng_message_id == XINGHENG_REALTIME and status.xingheng_min_cell_mv > status.xingheng_max_cell_mv:
+            return False, "星恒最低单体电压不能高于最高单体电压"
         return True, ""

@@ -186,3 +186,34 @@ class StatusBits:
     # 锂神单线 BMS V1.1.1：追加字段，不改变已有位置参数的顺序。
     lishen_total_voltage_v: int = 48
     lishen_temperature_c: int = 25
+
+    # 星恒智能BMS：仅追加字段，不改变旧模型位置参数；默认复现客户31字节截图。
+    xingheng_message_id: int = 0x3A
+    xingheng_version: int = 0x13
+    xingheng_soc_percent: float = 100.0
+    xingheng_voltage_v: float = 80.4
+    xingheng_current_a: float = 0.0
+    xingheng_max_temperature_c: int = 24
+    xingheng_min_temperature_c: int = 24
+    xingheng_mos_temperature_c: int = 23
+    xingheng_fault_code: int = 0
+    xingheng_work_state: int = 0
+    xingheng_response_device: int = 0
+    xingheng_bms_status_raw: int = 0x4A
+    xingheng_cycle_count: int = 2
+    xingheng_max_cell_mv: int = 3369
+    xingheng_min_cell_mv: int = 3332
+    xingheng_max_cell_index: int = 21
+    xingheng_min_cell_index: int = 5
+    xingheng_regen_current_a: float = 0.0
+    xingheng_charge_voltage_v: float = 86.4
+    xingheng_charge_current_a: float = 25.0
+    xingheng_charge_state: int = 0
+    xingheng_key_raw: int = 1
+    xingheng_result0_raw: int = 0x2F
+    xingheng_result1_raw: int = 0x9E
+    xingheng_manufacturer: int = 1
+    xingheng_model: int = 0
+    xingheng_material: int = 1
+    xingheng_rated_voltage_v: float = 72.0
+    xingheng_rated_capacity_ah: float = 20.0

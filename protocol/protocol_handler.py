@@ -19,6 +19,7 @@ from .definitions import (
     PROTOCOL_JINGXIAN,
     PROTOCOL_LITHIUM_BMS,
     PROTOCOL_LISHEN_BMS,
+    PROTOCOL_XINGHENG_BMS,
     PROTOCOL_LUYUAN_BMS,
     PROTOCOL_RUILUN,
     PROTOCOL_SHENZHOUXING,
@@ -53,6 +54,7 @@ from .codecs import (
     LithiumCodec,
     BatteryCodec,
     LishenBmsCodec,
+    XinghengBmsCodec,
 )
 from .constants import SXSY_P_GEAR_STATES, VOLTAGE_OPTIONS
 from .descriptions import get_byte_descriptions as _get_byte_descriptions
@@ -79,6 +81,7 @@ class ProtocolHandler(
     LithiumCodec,
     BatteryCodec,
     LishenBmsCodec,
+    XinghengBmsCodec,
     StatusValidation,
 ):
     """保持旧接口的协议门面；各协议实现与公共调度分开维护。"""
@@ -101,9 +104,12 @@ class ProtocolHandler(
             return PROTOCOL_RUILUN
         return protocol_name
 
-    def get_protocol_frame_length(self, protocol_name: str) -> int:
-        """获取协议帧长度。"""
+    def get_protocol_frame_length(self, protocol_name: str, status=None) -> int:
+        """保留旧单参数默认长度查询；星恒可按可选状态查询20/31字节格式。"""
 
+        if protocol_name == PROTOCOL_XINGHENG_BMS and status is not None:
+            from .xingheng import xingheng_frame_length
+            return xingheng_frame_length(status.xingheng_message_id)
         definition = PROTOCOL_DEFINITIONS.get(
             protocol_name, DEFAULT_PROTOCOL_DEFINITION
         )
@@ -294,8 +300,11 @@ class ProtocolHandler(
             setattr(copied, field_name, getattr(status, field_name))
         return copied
 
-    def get_byte_descriptions(self, protocol_name: str) -> List[str]:
-        """返回本协议的字节说明，兼容原有公开入口。"""
+    def get_byte_descriptions(self, protocol_name: str, status=None) -> List[str]:
+        """保留旧单参数说明查询，按可选状态返回星恒当前格式的独立说明。"""
+        if protocol_name == PROTOCOL_XINGHENG_BMS and status is not None:
+            from .xingheng import xingheng_byte_descriptions
+            return xingheng_byte_descriptions(status.xingheng_message_id)
         return _get_byte_descriptions(protocol_name)
 
     def format_frame_display(self, frame: List[int]) -> str:

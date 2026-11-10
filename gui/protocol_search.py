@@ -12,6 +12,7 @@ from protocol.definitions import (
     PROTOCOL_LITHIUM_BMS, PROTOCOL_LUYUAN_BMS, PROTOCOL_RUILUN, PROTOCOL_SHENZHOUXING,
     PROTOCOL_SXSY, PROTOCOL_TAILING_Y34B, PROTOCOL_TAILING_Y34F, PROTOCOL_WUXI_YIGE,
     PROTOCOL_XINCHI, PROTOCOL_XINRI, PROTOCOL_YADEA, PROTOCOL_YOUYIBAO,
+    PROTOCOL_XINGHENG_BMS,
 )
 
 # 集中维护全拼和首字母；型号和英文保持原样，新协议在此补一条，不改编码注册表。
@@ -35,6 +36,7 @@ PROTOCOL_SEARCH_ALIASES = MappingProxyType({
     PROTOCOL_LITHIUM_BMS: ("yixiantonglidianchibms", "yxtldcbms"),
     PROTOCOL_BATTERY_SINGLE_WIRE: ("dianchidanxiantongxunxieyi", "dcdxtxxy"),
     PROTOCOL_LISHEN_BMS: ("lishendanxianbms", "lsdxbms"),
+    PROTOCOL_XINGHENG_BMS: ("xinghengzhinengbms", "xh"),
 })
 
 

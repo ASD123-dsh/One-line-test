@@ -49,7 +49,8 @@ class LishenEncodingTests(unittest.TestCase):
         self.assertEqual((definition.frame_length, definition.checksum_mode, definition.send_mode), (6, "sum", "uart"))
         self.assertEqual((definition.min_send_interval_ms, definition.max_send_interval_ms, definition.default_send_interval_ms), (10, 5000, 1000))
         self.assertTrue(definition.reset_send_interval_on_switch)
-        self.assertEqual([field.name for field in fields(StatusBits)][-2:], ["lishen_total_voltage_v", "lishen_temperature_c"])
+        # 新协议只能在旧模型末尾追加；锂神两字段仍保持原位置126、127。
+        self.assertEqual([field.name for field in fields(StatusBits)][126:128], ["lishen_total_voltage_v", "lishen_temperature_c"])
 
     def test_document_table_negative_temperature_example(self):
         """规格书表格原值：00 32 30 F6 00 58，-10℃ 必须编码为 F6。"""

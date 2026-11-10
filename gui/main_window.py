@@ -46,7 +46,7 @@ from protocol.protocol_handler import (
     StatusBits,
     PresetScenarios,
 )
-from protocol.definitions import DEFAULT_PROTOCOL_DEFINITION, PROTOCOL_DEFINITIONS
+from protocol.definitions import DEFAULT_PROTOCOL_DEFINITION, PROTOCOL_DEFINITIONS, PROTOCOL_XINGHENG_BMS
 from gui.feedback_dialog import FeedbackDialog
 from gui.protocol_ui_registry import get_protocol_ui_spec
 from serial_comm.serial_manager import SerialManager, SerialPortDetector
@@ -77,6 +77,7 @@ from gui.protocol_pages import (
     LithiumBmsPages,
     BatterySingleWirePages,
     LishenBmsPages,
+    XinghengBmsPages,
     XinsiweiPages,
     XinriPages,
     CommonProtocolForms,
@@ -91,6 +92,7 @@ class MainWindow(
     LithiumBmsPages,
     BatterySingleWirePages,
     LishenBmsPages,
+    XinghengBmsPages,
     XinsiweiPages,
     XinriPages,
     CommonProtocolForms,
@@ -1143,7 +1145,7 @@ class MainWindow(
             self.status_tabs.set_editable(False)
             self.frame_config_btn.setEnabled(True)
 
-            frame_length = self.protocol_handler.get_protocol_frame_length(self.current_protocol)
+            frame_length = self.protocol_handler.get_protocol_frame_length(self.current_protocol, self.current_status)
             needs_default_frame = (
                 previous_scenario == 3
                 or self.custom_frame_data is None
@@ -1401,7 +1403,7 @@ class MainWindow(
         self.current_frame_text.setPlainText(self.protocol_handler.format_frame_display(frame_data))
         self.frame_preview.set_frame(
             self.current_protocol, frame_data,
-            self.protocol_handler.get_byte_descriptions(self.current_protocol),
+            self.protocol_handler.get_byte_descriptions(self.current_protocol, self.current_status),
         )
         self._schedule_preview_fit()
 
@@ -1531,6 +1533,8 @@ class MainWindow(
 
     def _get_packet_sequence_frames(self):
         frames = self.packet_sequence_frames.get(self.current_protocol)
+        if self.current_protocol == PROTOCOL_XINGHENG_BMS:
+            frames = self.xingheng_selected_packet_frames(frames)
         if frames:
             return [frame.copy() for frame in frames]
 
@@ -1539,8 +1543,10 @@ class MainWindow(
 
     @pyqtSlot()
     def open_packet_sequence_config(self):
-        frame_length = self.protocol_handler.get_protocol_frame_length(self.current_protocol)
+        frame_length = self.protocol_handler.get_protocol_frame_length(self.current_protocol, self.current_status)
         current_frames = self.packet_sequence_frames.get(self.current_protocol)
+        if self.current_protocol == PROTOCOL_XINGHENG_BMS:
+            current_frames = self.xingheng_selected_packet_frames(current_frames)
         try:
             if not current_frames:
                 current_frames = [self._make_default_custom_frame()]
@@ -1550,7 +1556,7 @@ class MainWindow(
             QMessageBox.critical(self, "帧生成失败", str(exc))
             return
 
-        byte_descriptions = self.protocol_handler.get_byte_descriptions(self.current_protocol)
+        byte_descriptions = self.protocol_handler.get_byte_descriptions(self.current_protocol, self.current_status)
         dialog = PacketSequenceDialog(
             self,
             initial_frames=current_frames,
@@ -1561,7 +1567,10 @@ class MainWindow(
         )
         self.packet_sequence_dialog = dialog
         if dialog.exec_() == QDialog.Accepted:
-            self.packet_sequence_frames[self.current_protocol] = dialog.get_frames()
+            if self.current_protocol == PROTOCOL_XINGHENG_BMS:
+                self.store_xingheng_packet_frames(dialog.get_frames())
+            else:
+                self.packet_sequence_frames[self.current_protocol] = dialog.get_frames()
 
     @pyqtSlot()
     def toggle_packet_sequence_send(self):
@@ -1662,7 +1671,7 @@ class MainWindow(
 
     def _make_default_custom_frame(self):
         """按当前协议和当前 UI 状态生成全自定义模式的初始帧。"""
-        frame_length = self.protocol_handler.get_protocol_frame_length(self.current_protocol)
+        frame_length = self.protocol_handler.get_protocol_frame_length(self.current_protocol, self.current_status)
 
         status = self.current_status
         if self.custom_radio.isChecked():
@@ -1688,7 +1697,7 @@ class MainWindow(
     @pyqtSlot()
     def open_frame_config(self):
         """打开帧配置窗口"""
-        frame_length = self.protocol_handler.get_protocol_frame_length(self.current_protocol)
+        frame_length = self.protocol_handler.get_protocol_frame_length(self.current_protocol, self.current_status)
 
         if self.custom_frame_data is None or len(self.custom_frame_data) != frame_length:
             try:
@@ -1697,7 +1706,7 @@ class MainWindow(
                 QMessageBox.critical(self, "帧生成失败", str(exc))
                 return
 
-        byte_descriptions = self.protocol_handler.get_byte_descriptions(self.current_protocol)
+        byte_descriptions = self.protocol_handler.get_byte_descriptions(self.current_protocol, self.current_status)
         self.frame_config_dialog = FrameConfigDialog(
             self,
             self.custom_frame_data,

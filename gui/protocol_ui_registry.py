@@ -20,6 +20,7 @@ from protocol.definitions import (
     PROTOCOL_JINGXIAN,
     PROTOCOL_LITHIUM_BMS,
     PROTOCOL_LISHEN_BMS,
+    PROTOCOL_XINGHENG_BMS,
     PROTOCOL_LUYUAN_BMS,
     PROTOCOL_RUILUN,
     PROTOCOL_SHENZHOUXING,
@@ -46,6 +47,12 @@ class ProtocolUiSpec:
 
 
 PROTOCOL_UI_SPECS: Mapping[str, ProtocolUiSpec] = MappingProxyType({
+    PROTOCOL_XINGHENG_BMS: ProtocolUiSpec(
+        "switch_to_xingheng_bms_protocol",
+        "load_xingheng_bms_preset_scenario",
+        "get_xingheng_status_from_ui",
+        "update_xingheng_bms_ui_from_status",
+    ),
     PROTOCOL_RUILUN: ProtocolUiSpec(
         "switch_to_ruilun_protocol",
         "load_ruilun_preset_scenario",

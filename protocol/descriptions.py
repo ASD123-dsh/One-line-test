@@ -15,6 +15,7 @@ from .definitions import (
     PROTOCOL_JINGXIAN,
     PROTOCOL_LITHIUM_BMS,
     PROTOCOL_LISHEN_BMS,
+    PROTOCOL_XINGHENG_BMS,
     PROTOCOL_LUYUAN_BMS,
     PROTOCOL_RUILUN,
     PROTOCOL_SHENZHOUXING,
@@ -294,4 +295,7 @@ _BYTE_DESCRIPTIONS = MappingProxyType({
 
 def get_byte_descriptions(protocol_name):
     """获取说明副本，未知名称保留旧瑞轮回退行为。"""
+    if protocol_name == PROTOCOL_XINGHENG_BMS:
+        from .xingheng import xingheng_byte_descriptions
+        return xingheng_byte_descriptions()
     return list(_BYTE_DESCRIPTIONS.get(protocol_name, _BYTE_DESCRIPTIONS[PROTOCOL_RUILUN]))

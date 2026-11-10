@@ -20,6 +20,7 @@ from protocol.protocol_handler import (
     PROTOCOL_JINGXIAN,
     PROTOCOL_LITHIUM_BMS,
     PROTOCOL_LISHEN_BMS,
+    PROTOCOL_XINGHENG_BMS,
     PROTOCOL_LUYUAN_BMS,
     PROTOCOL_RUILUN,
     PROTOCOL_TAILING_Y34B,
@@ -86,7 +87,7 @@ class ProtocolHandlerTests(unittest.TestCase):
             )
             self.assertEqual(
                 definition.default_send_interval_ms,
-                1000 if protocol_name == PROTOCOL_LISHEN_BMS else DEFAULT_SEND_INTERVAL_MS,
+                1000 if protocol_name in {PROTOCOL_LISHEN_BMS, PROTOCOL_XINGHENG_BMS} else DEFAULT_SEND_INTERVAL_MS,
             )
             self.assertTrue(
                 callable(getattr(self.handler, definition.generator_method))
@@ -1014,6 +1015,9 @@ class ProtocolHandlerTests(unittest.TestCase):
                     soc_percent=101,
                     soc_fault=True,
                 )
+                if protocol_name == PROTOCOL_XINGHENG_BMS:
+                    # 星恒的0.5%精度SOC是独立字段；仍验证故障开关不能绕过其范围。
+                    status.xingheng_soc_percent = 101
 
                 success, frame, error = self.handler.generate_frame_for_preview(
                     status
@@ -1025,7 +1029,7 @@ class ProtocolHandlerTests(unittest.TestCase):
                 else:
                     self.assertFalse(success)
                     self.assertEqual(frame, [])
-                    self.assertIn("0-100", error)
+                    self.assertIn("0～100" if protocol_name == PROTOCOL_XINGHENG_BMS else "0-100", error)
 
     def test_soc_range_still_applies_without_fault_encoding(self):
         for protocol_name in (

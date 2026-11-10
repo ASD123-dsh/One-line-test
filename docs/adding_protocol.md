@@ -179,6 +179,11 @@ PROTOCOL_UI_SPECS = MappingProxyType({
 - 每个字节必须是非布尔整数且在 `0-255` 范围内。
 - 固定长度协议必须传入 `expected_length` 校验。
 
+星恒现阶段支持两个已确认的固定格式：默认 `0x3A` 为31字节、`0x01` 为20字节。
+旧单参数元数据查询保持默认值；使用 `ProtocolHandler.get_protocol_frame_length(name, status)`
+和 `get_byte_descriptions(name, status)` 可取得当前类型长度及说明。包组配置可保留两种长度，
+编辑和循环只处理当前类型；切换类型先停止旧循环，不放宽其他协议的固定长度校验。
+
 不要在各对话框或发送路径中再写一套不同的字节校验规则。
 
 ## 7. 添加测试

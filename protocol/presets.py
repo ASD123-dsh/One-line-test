@@ -13,6 +13,7 @@ from .definitions import (
     PROTOCOL_JINGXIAN,
     PROTOCOL_LITHIUM_BMS,
     PROTOCOL_LISHEN_BMS,
+    PROTOCOL_XINGHENG_BMS,
     PROTOCOL_LUYUAN_BMS,
     PROTOCOL_RUILUN,
     PROTOCOL_SHENZHOUXING,
@@ -28,6 +29,29 @@ from .models import StatusBits
 
 class PresetScenarios:
     """预设场景。"""
+
+    @staticmethod
+    def xingheng_bms_normal_running() -> StatusBits:
+        """复现客户3A 13 1B截图，原始保护字段仅作样例，不代表加密有效。"""
+        return StatusBits(protocol_name=PROTOCOL_XINGHENG_BMS)
+
+    @staticmethod
+    def xingheng_bms_energy_recovery() -> StatusBits:
+        """生成回馈测试数据，不计算或伪造新的保护字段。"""
+        status = StatusBits(protocol_name=PROTOCOL_XINGHENG_BMS)
+        status.xingheng_soc_percent = 80.0
+        status.xingheng_work_state = 2
+        status.xingheng_current_a = -3.0
+        return status
+
+    @staticmethod
+    def xingheng_bms_fault_scenario() -> StatusBits:
+        """使用表A.4的放电高温保护码，保留原始字段以明确非认证测试。"""
+        status = StatusBits(protocol_name=PROTOCOL_XINGHENG_BMS)
+        status.xingheng_soc_percent = 15.0
+        status.xingheng_max_temperature_c = 78
+        status.xingheng_fault_code = 0x05
+        return status
 
     @staticmethod
     def normal_running() -> StatusBits:

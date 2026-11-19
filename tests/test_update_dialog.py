@@ -34,11 +34,12 @@ class UpdateMenuTests(unittest.TestCase):
         self.addCleanup(self.window.close)
 
     def test_single_tools_button_contains_all_grouped_menu_items(self):
-        """右上角只保留一个按钮，原配置诊断和更新反馈按组排列且不重复。"""
+        """原菜单仍唯一，未连接时机器人隐藏，配置诊断和更新反馈不重复。"""
         button = self.window.tools_btn
         self.assertEqual(button.text(), "配置 / 诊断")
         self.assertEqual(button.popupMode(), QToolButton.InstantPopup)
-        self.assertEqual(button.parentWidget().findChildren(QToolButton), [button])
+        self.assertEqual([item for item in button.parentWidget().findChildren(QToolButton) if not item.isHidden()], [button])
+        self.assertTrue(self.window.ai_status_btn.isHidden())
         self.assertIs(self.window.feedback_btn, button)
         self.assertIs(self.window.help_menu, button.menu())
         self.assertEqual([
@@ -46,7 +47,7 @@ class UpdateMenuTests(unittest.TestCase):
             for action in button.menu().actions()
         ], [
             "导入配置…", "导出配置…", "记住本机配置（默认关闭）", None,
-            "导出脱敏诊断…", "查看升级恢复指引", None, "检测更新", "扫码反馈",
+            "导出脱敏诊断…", "查看升级恢复指引", "AI 本机接口…", None, "检测更新", "扫码反馈",
         ])
         self.assertIn(APP_VERSION, self.window.windowTitle())
 

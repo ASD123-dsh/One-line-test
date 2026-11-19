@@ -2,6 +2,28 @@
 
 ## 当前版本与发布状态
 
+### V1.58.9 AI本机控制与Codex接入
+
+2026-11-19用户确认本轮AI功能正常，授权提交、合并main并发布V1.58.9。直接沿用已验收的
+2026-11-19两个ZIP及校验文件，不重新编译，不修改协议、激活或更新算法。面向用户只写
+[三条简短说明](releases/v1.58.9.md)，完整范围与验证见[AI接入记录](ai-control.md)。
+
+仅提交相关源码、测试和文档，保留AGENTS.md及历史回退记录的既有本地变更；不提交dist二进制、
+PDF、私有激活生成器或授权数据。PR/CI通过后合并main，标签必须指向合并提交。
+正式公开、Latest、标签及四附件大小/摘要和匿名实际下载核验后执行：
+
+```powershell
+python -B tools/archive_release.py `
+  --source "dist/历史归档/本地测试包/v1.58.9-ai-consent-20261119" `
+  --record "build/release-v1.58.9-20261119/release-publication.json" `
+  --notes "docs/releases/v1.58.9.md" `
+  --verification "dist/历史归档/本地测试包/v1.58.9-ai-consent-20261119/packaging-verification.json" `
+  --prune-source
+```
+
+正式记录统一位于`dist/历史归档/正式发行版/v1.58.9/`；打包阶段JSON中的未发布状态是历史事实，
+保留原值，不用用户验收代替线上核验。只清理本轮独占生成目录及已归档副本，旧恢复包和用户数据保留。
+
 ### V1.58.8 星恒智能BMS
 
 2026-11-10 用户确认0x3A实时报文、公有报文、循环动态修改及原有协议正常，授权提交、

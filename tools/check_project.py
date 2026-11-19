@@ -10,7 +10,7 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE_DIRS = ("gui", "protocol", "serial_comm", "updating", "licensing", "tools", "tests")
+SOURCE_DIRS = ("gui", "protocol", "serial_comm", "updating", "licensing", "ai_control", "tools", "tests")
 ROOT_SOURCES = ("main.py", "app_info.py", "app_paths.py", "app_settings.py", "diagnostics.py")
 PRIVATE_LOCAL_SOURCES = frozenset(("tools/activation_tool.py", "tools/generate_activation_code.py"))
 

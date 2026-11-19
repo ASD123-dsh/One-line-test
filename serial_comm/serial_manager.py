@@ -79,6 +79,8 @@ class SerialManager(QObject):
     connection_error = pyqtSignal(str)
     timing_warning = pyqtSignal(str)
     statistics_changed = pyqtSignal(dict)
+    # AI接口只订阅完成快照；不改变原data_sent信号、同步返回值或循环调度。
+    write_completed = pyqtSignal(dict)
 
     def __init__(self, background_send=False):
         """默认保留同步调用契约，界面可显式启用后台串口写入。"""
@@ -729,6 +731,13 @@ class SerialManager(QObject):
         """在管理器所属线程处理完成结果和断开请求，旧循环结果不污染新界面。"""
         self._worker.acknowledge()
         job = result["job"]
+        # 保留停发时已在途帧的实际结果，解决自动化把“受理”误报为“已写入”的问题。
+        self.write_completed.emit({
+            "generation": job["generation"], "frame": list(job["frame"]),
+            "success": bool(result.get("success")), "timestamp": result.get("timestamp", ""),
+            "error": result.get("error", ""), "throttled": bool(result.get("throttled")),
+            "cancelled": bool(result.get("cancelled")),
+        })
         if self._closing_port:
             self.statistics.record(result)
             self.disconnect_port()
@@ -793,6 +802,10 @@ class SerialManager(QObject):
     def is_write_pending(self) -> bool:
         """查询后台写入是否仍在途，不读取串口驱动状态。"""
         return self._worker is not None and self._worker.busy
+
+    def get_send_generation(self) -> int:
+        """只读获取当前任务代次，供本机接口区分AI任务和后来启动的手动任务。"""
+        return self._send_generation
 
     def set_tosc_value(self, tosc_us: int) -> bool:
         if (

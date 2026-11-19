@@ -31,6 +31,7 @@ class SettingsPanel:
         menu.addSeparator()
         menu.addAction("导出脱敏诊断…", self.export_diagnostic_report)
         menu.addAction("查看升级恢复指引", self.show_recovery_guidance)
+        self.ai_interface_action = menu.addAction("AI 本机接口…", self.show_ai_control_dialog)
         # 按用户要求合并原问号入口，继续复用更新确认和扫码反馈的原处理方法。
         menu.addSeparator()
         self.check_update_action = menu.addAction("检测更新", self.show_update_dialog)

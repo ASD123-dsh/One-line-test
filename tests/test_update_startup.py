@@ -210,7 +210,9 @@ class MainStartupNotificationTests(unittest.TestCase):
                         with self.assertRaises(SystemExit):
                             entry.main()
                         window.show.assert_called_once_with()
-                        timer.assert_called_once_with(0, entry.notify_startup_ready)
+                        self.assertEqual(timer.call_count, 2)
+                        self.assertEqual(timer.call_args_list[0].args, (0, entry.notify_startup_ready))
+                        self.assertEqual(timer.call_args_list[1].args, (0, window.prepare_ai_connection_requests))
 
     def test_activation_dialog_also_schedules_notification(self):
         """激活窗口可正常显示不应被误判为升级启动失败。"""

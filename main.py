@@ -68,6 +68,8 @@ def main() -> None:
     main_window.show()
     # 进入 GUI 事件循环后才确认启动，不以创建进程成功替代界面就绪。
     QTimer.singleShot(0, notify_startup_ready)
+    # AI申请在原升级就绪通知之后准备，失败或等待都不能延迟原升级握手。
+    QTimer.singleShot(0, main_window.prepare_ai_connection_requests)
 
     # 运行应用程序
     try:

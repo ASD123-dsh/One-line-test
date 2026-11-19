@@ -17,7 +17,7 @@ from PyQt5.QtWidgets import (
     QGroupBox, QLabel, QComboBox, QPushButton, QSpinBox, QDoubleSpinBox,
     QCheckBox, QRadioButton, QButtonGroup, QTextEdit, QLineEdit,
     QMessageBox, QSplitter, QFrame, QScrollArea, QTabWidget,
-    QStatusBar, QDialog, QApplication
+    QStatusBar, QDialog, QApplication, QToolButton
 )
 from PyQt5.QtCore import Qt, QTimer, pyqtSlot
 from PyQt5.QtGui import QFont
@@ -107,6 +107,10 @@ class MainWindow(
         self.settings_store = settings_store if settings_store is not None else SettingsStore(user_data_directory() / "settings.json")
         self._recovery_notice = ""
         self.activation_service = activation_service
+        # 正常启动后仅准备申请入口；用户同意前不开放测试数据或操作权限。
+        self.ai_controller = None
+        self.ai_control_dialog = None
+        self.ai_connection_dialog = None
         self.protocol_handler = ProtocolHandler()
         self.serial_manager = SerialManager(background_send=True)
         self.port_detector = SerialPortDetector()
@@ -228,6 +232,15 @@ class MainWindow(
         title_label.hide()
         layout.addStretch()
 
+        self.ai_status_btn = QToolButton()
+        self.ai_status_btn.setObjectName("aiStatusButton")
+        self.ai_status_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.ai_status_btn.setCursor(Qt.PointingHandCursor)
+        self.ai_status_btn.setAccessibleName("AI连接状态和授权管理")
+        self.ai_status_btn.clicked.connect(self.show_ai_control_dialog)
+        self.ai_status_btn.hide()
+        layout.addWidget(self.ai_status_btn)
+
         self.tools_btn = self.create_tools_button()
         self.tools_btn.setIcon(ui_icon("settings"))
         self.tools_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
@@ -238,6 +251,78 @@ class MainWindow(
         layout.addWidget(self.tools_btn)
 
         return bar
+
+    def show_ai_control_dialog(self):
+        """显示非模态连接管理，可随时撤销本次授权，不影响手动串口。"""
+        from gui.ai_control_dialog import AiControlDialog
+        self._ensure_ai_controller()
+        if self.ai_control_dialog is None:
+            self.ai_control_dialog = AiControlDialog(self.ai_controller, self)
+            self.ai_control_dialog.finished.connect(self._ai_dialog_finished)
+        self.ai_control_dialog.show()
+        self.ai_control_dialog.raise_()
+        self.ai_control_dialog.activateWindow()
+
+    def _ensure_ai_controller(self):
+        """共用同一协调器及完成信号，不创建第二份串口管理器或MCP依赖。"""
+        from gui.ai_controller import AiController
+        if self.ai_controller is None:
+            self.ai_controller = AiController(self)
+            self.ai_controller.connection_requested.connect(self._show_ai_connection_request)
+            self.ai_controller.state_changed.connect(self._refresh_ai_connection_badge)
+
+    def prepare_ai_connection_requests(self):
+        """原激活流程完成后仅监听连接申请，失败不阻止主程序、升级或手动操作。"""
+        try:
+            self._ensure_ai_controller()
+            self.ai_controller.listen_for_requests()
+        except (OSError, ValueError) as exc:
+            self.status_bar.showMessage(f"AI连接申请入口未开启：{exc}", 8000)
+
+    def _show_ai_connection_request(self, request_id):
+        """本机申请到达时展示一份非模态人工确认，不自动连接或发送。"""
+        from gui.ai_control_dialog import AiConnectionRequestDialog
+        if self.ai_connection_dialog is not None:
+            return
+        self.ai_connection_dialog = AiConnectionRequestDialog(self.ai_controller, request_id, self)
+        self.ai_connection_dialog.finished.connect(self._ai_connection_dialog_finished)
+        self.ai_connection_dialog.show()
+        self.ai_connection_dialog.raise_()
+        self.ai_connection_dialog.activateWindow()
+
+    def _ai_connection_dialog_finished(self, result):
+        """关闭后释放提示引用，下一次申请仍须重新确认。"""
+        self.ai_connection_dialog = None
+
+    def _refresh_ai_connection_badge(self):
+        """仅在申请、获准或实际操作时显示机器人；监听中不冒充AI已连接。"""
+        from gui.soft_theme import PALETTE
+        state = self.ai_controller.connection_state()
+        labels = {"pending": ("AI申请中", "warning"), "working": ("AI测试中", "running"),
+                  "connected": ("AI连接中", "ready"), "idle": ("AI已授权", "muted")}
+        if state["state"] in labels:
+            text, tone = labels[state["state"]]
+            self.ai_status_btn.setText(text)
+            set_visual_property(self.ai_status_btn, "badgeTone", tone)
+            color = PALETTE[{"warning": "badge_running", "running": "badge_running", "ready": "badge_ready", "muted": "badge_muted"}[tone]]
+            self.ai_status_btn.setIcon(ui_icon("robot", color, 18))
+            access = "可控制" if state["write_authorized"] else "只读" if state["state"] != "pending" else "等待你确认"
+            self.ai_status_btn.setToolTip(f"本机AI：{access}；点击管理或断开本次连接。空闲不代表持续网络连接。")
+            self.ai_status_btn.show()
+        else:
+            self.ai_status_btn.hide()
+        dialog = self.ai_connection_dialog
+        if dialog is not None and state["request_id"] != dialog.request_id:
+            dialog.dismiss()
+
+    def _ai_dialog_finished(self, result):
+        """设置窗口关闭不自动中断已授权任务；主窗口关闭仍会停服并撤销权限。"""
+        self.ai_control_dialog = None
+
+    def _before_manual_control(self, stop=True):
+        """用户操作优先；接口未创建时不改变任何旧行为。"""
+        if self.ai_controller is not None:
+            self.ai_controller.manual_takeover(stop=stop)
 
     def show_update_dialog(self):
         """用户点击菜单后检测更新，后台下载完成后再由用户确认升级。"""
@@ -854,6 +939,7 @@ class MainWindow(
     @pyqtSlot()
     def toggle_connection(self):
         """切换串口连接状态"""
+        self._before_manual_control()
         if self.serial_manager.is_connected:
             # 断开连接
             self.serial_manager.disconnect_port()
@@ -941,6 +1027,8 @@ class MainWindow(
     @pyqtSlot(str)
     def on_protocol_changed(self, protocol_name):
         """协议切换处理"""
+        # 协议手动切换撤销AI控制，避免后台继续改回旧协议；AI自身调用由协调器识别。
+        self._before_manual_control(stop=False)
         try:
             ui_spec = get_protocol_ui_spec(protocol_name)
         except ValueError as exc:
@@ -1410,6 +1498,7 @@ class MainWindow(
     @pyqtSlot()
     def send_single_frame(self):
         """发送单帧数据"""
+        self._before_manual_control()
         # 检查当前模式并获取帧数据
         if self.frame_custom_radio.isChecked():
             # 全部自定义模式 - 使用自定义帧数据
@@ -1459,6 +1548,7 @@ class MainWindow(
     @pyqtSlot()
     def toggle_cyclic_send(self):
         """切换循环发送状态"""
+        self._before_manual_control(stop=False)
         if self.serial_manager.is_cyclic_sending():
             if self.active_send_mode == "single":
                 self.serial_manager.stop_cyclic_send()
@@ -1574,6 +1664,8 @@ class MainWindow(
 
     @pyqtSlot()
     def toggle_packet_sequence_send(self):
+        """保留原包组切换行为，用户操作撤销AI控制但不反转停止意图。"""
+        self._before_manual_control(stop=False)
         if self.serial_manager.is_cyclic_sending():
             if self.active_send_mode == "sequence":
                 self.serial_manager.stop_cyclic_send()
@@ -1659,6 +1751,10 @@ class MainWindow(
     @pyqtSlot(str)
     def on_connection_error(self, error_msg):
         """连接错误"""
+        if self.ai_controller is not None and self.ai_controller.executing:
+            # 自动化错误由JSON返回；不弹出会阻塞待处理网络请求的模态对话框。
+            self.status_bar.showMessage(error_msg, 5000)
+            return
         QMessageBox.critical(self, "连接错误", error_msg)
 
     @pyqtSlot()
@@ -1760,6 +1856,8 @@ class MainWindow(
 
     def closeEvent(self, event):
         """窗口关闭事件"""
+        if self.ai_controller is not None:
+            self.ai_controller.shutdown()
         # 修复关闭窗口后后台线程仍持有串口的问题，不能强杀正在写入的线程。
         if not self.serial_manager.shutdown():
             self.status_bar.showMessage("串口仍在完成当前帧，请稍后再次关闭窗口", 5000)

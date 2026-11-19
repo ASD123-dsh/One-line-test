@@ -69,6 +69,34 @@ def soft_glass_stylesheet():
             font-size: 11pt;
             font-weight: bold;
         }
+        QToolButton#aiStatusButton
+        {
+            color: #666666;
+            background: #e8e8e8;
+            border: 1px solid transparent;
+            border-radius: 5px;
+            padding: 3px 8px;
+            min-height: 18px;
+        }
+        QToolButton#aiStatusButton[badgeTone="ready"]
+        {
+            color: #2e7d32;
+            background: #e8f5e9;
+        }
+        QToolButton#aiStatusButton[badgeTone="running"]
+        {
+            color: #1267c5;
+            background: #e7f0fa;
+        }
+        QToolButton#aiStatusButton[badgeTone="warning"]
+        {
+            color: #8a5700;
+            background: #fff3e0;
+        }
+        QToolButton#aiStatusButton:hover
+        {
+            border-color: #b0b0b0;
+        }
         QLabel
         {
             color: #202020;

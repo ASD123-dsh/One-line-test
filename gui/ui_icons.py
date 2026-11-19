@@ -56,6 +56,16 @@ def _draw_symbol(painter, name):
             points.append(QPointF(12 + radius * cos(angle), 12 + radius * sin(angle)))
         painter.drawPolygon(QPolygonF(points))
         painter.drawEllipse(QRectF(8.5, 8.5, 7, 7))
+    elif name == "robot":
+        # 本机AI会话使用独立符号，复用透明画布和状态配色，避免黑底图标。
+        painter.drawRoundedRect(QRectF(4, 7, 16, 13), 3, 3)
+        painter.drawLine(12, 4, 12, 7)
+        painter.drawEllipse(QRectF(10.5, 1.5, 3, 3))
+        painter.drawLine(1, 11, 1, 16)
+        painter.drawLine(23, 11, 23, 16)
+        painter.drawEllipse(QRectF(7.5, 10.5, 2, 2))
+        painter.drawEllipse(QRectF(14.5, 10.5, 2, 2))
+        painter.drawLine(9, 16, 15, 16)
     elif name == "edit":
         painter.drawPolygon(QPolygonF([QPointF(4, 16), QPointF(16, 4), QPointF(20, 8), QPointF(8, 20), QPointF(3, 21)]))
         painter.drawLine(13, 7, 17, 11)

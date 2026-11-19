@@ -58,6 +58,16 @@ class ButtonIconTests(unittest.TestCase):
         self.assertEqual(button_icon("copy").availableSizes(), normal.availableSizes())
         self.assertTrue(all(color == QColor("#263c4b") for color in opaque_colors(normal)))
 
+    def test_robot_icon_uses_transparent_canvas_and_requested_status_color(self):
+        """机器人图标复用透明矢量绘制，浅灰操作栏上没有黑底或黑色角落。"""
+        icon = ui_icon("robot", PALETTE["badge_ready"], 18)
+        colors = opaque_colors(icon)
+        self.assertGreater(len(colors), 8)
+        self.assertTrue(all(color == QColor(PALETTE["badge_ready"]) for color in colors))
+        image = icon.pixmap(QSize(36, 36)).toImage()
+        for x, y in ((0, 0), (0, image.height() - 1), (image.width() - 1, 0), (image.width() - 1, image.height() - 1)):
+            self.assertEqual(image.pixelColor(x, y).alpha(), 0)
+
 
 class IconWindowTests(unittest.TestCase):
     """真实主窗口的图标接入、圆角背景和原功能状态保持兼容。"""
